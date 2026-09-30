@@ -24,8 +24,8 @@
 }
 
 .monbar-panel-count-warn {
-    background-color: rgba(245, 194, 17, 0.9);
-    color: #241f31;
+    background-color: #e5a50a;
+    color: #1c1c1c;
 }
 
 .monbar-panel-crit .monbar-panel-icon {
@@ -33,7 +33,7 @@
 }
 
 .monbar-panel-warn .monbar-panel-icon {
-    color: #f8e45c;
+    color: #ffb84d;
 }
 
 .monbar-panel-error .monbar-panel-icon,
@@ -43,7 +43,7 @@
 
 /* Kein Ziel liefert Daten: Warnfarbe statt gedimmt */
 .monbar-panel-unreach .monbar-panel-icon {
-    color: #f8e45c;
+    color: #ffb84d;
 }
 
 /* Popup Menü */
@@ -92,8 +92,8 @@
 }
 
 .monbar-hint-banner {
-    background-color: rgba(245, 194, 17, 0.18);
-    border: 1px solid rgba(245, 194, 17, 0.55);
+    background-color: rgba(229, 165, 10, 0.16);
+    border: 1px solid rgba(229, 165, 10, 0.5);
     border-radius: 8px;
     padding: 6px 10px;
     spacing: 8px;
@@ -101,7 +101,7 @@
 
 .monbar-hint-icon {
     icon-size: 18px;
-    color: #f5c211;
+    color: #ffb84d;
 }
 
 .monbar-hint-text {
@@ -198,9 +198,13 @@
     color: #ff7b63;
 }
 
+.monbar-card-warn {
+    border-color: rgba(229, 165, 10, 0.45);
+}
+
 .monbar-card-warn .monbar-card-icon,
 .monbar-card-warn .monbar-card-status {
-    color: #f8e45c;
+    color: #ffb84d;
 }
 
 .monbar-card-unknown .monbar-card-icon,
@@ -224,7 +228,7 @@
 
 .monbar-empty-warn .monbar-ok-icon,
 .monbar-empty-partial .monbar-ok-icon {
-    color: #f8e45c;
+    color: #ffb84d;
 }
 
 .monbar-empty-warn .monbar-empty-text {
@@ -241,7 +245,7 @@
 }
 
 .monbar-summary-warn {
-    color: #f8e45c;
+    color: #ffb84d;
 }
 
 /* Footer */
@@ -273,4 +277,72 @@
     font-size: 9.5pt;
     opacity: 0.6;
     padding: 10px 4px;
+}
+
+/* ==========================================================================
+   Helles Popup (GNOME-Farbschema nicht „dunkel“) – die Top-Bar bleibt dunkel,
+   deshalb gelten diese Farben nur im Popup. Klasse setzt indicator.js.
+   Farben mit ausreichendem Kontrast auf Weiß (Text ≥ 4,5 : 1).
+   ========================================================================== */
+.monbar-light .monbar-card {
+    background-color: rgba(0, 0, 0, 0.035);
+    border-color: rgba(0, 0, 0, 0.10);
+}
+
+.monbar-light .monbar-card-main:hover,
+.monbar-light .monbar-card-main:focus {
+    background-color: rgba(0, 0, 0, 0.05);
+}
+
+.monbar-light .monbar-card-crit {
+    border-color: rgba(192, 28, 40, 0.45);
+}
+
+.monbar-light .monbar-card-crit .monbar-card-icon,
+.monbar-light .monbar-card-crit .monbar-card-status {
+    color: #c01c28;
+}
+
+.monbar-light .monbar-card-warn {
+    border-color: rgba(200, 120, 0, 0.45);
+}
+
+.monbar-light .monbar-card-warn .monbar-card-icon {
+    color: #c77800;
+}
+
+.monbar-light .monbar-card-warn .monbar-card-status {
+    color: #9a5b00;
+}
+
+.monbar-light .monbar-card-unknown .monbar-card-icon,
+.monbar-light .monbar-card-unknown .monbar-card-status {
+    color: #813d9c;
+}
+
+.monbar-light .monbar-card-maintenance .monbar-card-icon,
+.monbar-light .monbar-card-maintenance .monbar-card-status {
+    color: #5e5c64;
+}
+
+.monbar-light .monbar-hint-banner {
+    background-color: rgba(229, 165, 10, 0.12);
+    border-color: rgba(200, 120, 0, 0.45);
+}
+
+.monbar-light .monbar-hint-icon {
+    color: #c77800;
+}
+
+.monbar-light .monbar-empty-ok .monbar-ok-icon {
+    color: #1f8a4c;
+}
+
+.monbar-light .monbar-empty-warn .monbar-ok-icon,
+.monbar-light .monbar-empty-partial .monbar-ok-icon {
+    color: #c77800;
+}
+
+.monbar-light .monbar-summary-warn {
+    color: #9a5b00;
 }

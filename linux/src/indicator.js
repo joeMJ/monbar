@@ -93,6 +93,38 @@ class MonIndicator extends PanelMenu.Button {
 
         // 2. Popup Menü Aufbau
         this._buildMenu();
+
+        // Hell/Dunkel wie in snmpbar über das GNOME-Farbschema; die Top-Bar bleibt
+        // immer dunkel, umgeschaltet wird nur der Farbsatz des Popups.
+        this._interfaceSettings = null;
+        this._schemeSignal = null;
+        try {
+            this._interfaceSettings = new Gio.Settings({ schema_id: 'org.gnome.desktop.interface' });
+            this._schemeSignal = this._interfaceSettings.connect('changed::color-scheme', () => this._applyColorScheme());
+        } catch (e) {
+            console.warn(`[monbar] Farbschema nicht lesbar: ${e.message}`);
+        }
+        this._applyColorScheme();
+        this.connect('destroy', () => {
+            if (this._interfaceSettings && this._schemeSignal)
+                this._interfaceSettings.disconnect(this._schemeSignal);
+            this._schemeSignal = null;
+            this._interfaceSettings = null;
+        });
+    }
+
+    /** Popup hell, sofern das Farbschema nicht ausdrücklich „dunkel“ ist. */
+    _applyColorScheme() {
+        let dark = false;
+        try {
+            dark = this._interfaceSettings?.get_string('color-scheme') === 'prefer-dark';
+        } catch (_e) {
+            dark = false;
+        }
+        if (dark)
+            this.menu.box.remove_style_class_name('monbar-light');
+        else
+            this.menu.box.add_style_class_name('monbar-light');
     }
 
     _buildMenu() {
