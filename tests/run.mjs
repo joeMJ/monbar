@@ -448,6 +448,67 @@ test('Uptime Kuma: Monitore, Server-Zuordnung und Meldungen', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Export / Import
+// ---------------------------------------------------------------------------
+
+test('Export: Ziele, Abos und Optionen, aber keine Secrets oder fremden Felder', () => {
+    const t1 = { ...u.makeTarget('checkmk', 'Zuhause'), url: 'https://mon.lan', site: 'home', username: 'monbar', secret: 'GEHEIM' };
+    const s1 = { ...u.makeSubscription(t1.id, '*'), ignore: ['Log *'] };
+    const fremd = u.makeSubscription('tfremd0001', '*');
+    const text = u.buildExport({
+        targets: [t1], subs: [s1, fremd],
+        options: { 'panel-position': 'left', 'show-downtime': true, 'git-update-url': 'https://evil', 'notify-min-severity': 'boom' },
+        versionName: '0.3', now: new Date('2026-09-30T12:00:00Z'),
+    });
+    assert.ok(!text.includes('GEHEIM'));
+    const data = JSON.parse(text);
+    assert.equal(data.format, 'monbar-export');
+    assert.equal(data.subscriptions.length, 1);
+    assert.deepEqual(data.options, { 'panel-position': 'left', 'show-downtime': true });
+    assert.equal(data.targets[0].username, 'monbar');
+});
+
+test('Import: Datei wird geprüft, kaputte Einträge verworfen', () => {
+    assert.equal(u.parseImport('kein json').ok, false);
+    assert.equal(u.parseImport('{"format":"etwas"}').ok, false);
+    assert.match(u.parseImport('{"format":"monbar-export","version":99}').error, /neueren/);
+    const t = u.makeTarget('uptimekuma');
+    const r = u.parseImport(JSON.stringify({
+        format: 'monbar-export', version: 1,
+        targets: [t, { id: 'kaputt' }],
+        subscriptions: [u.makeSubscription(t.id, '*'), u.makeSubscription('tunbekannt', '*')],
+        options: { 'show-ok-icon': false, 'panel-position': 'oben' },
+    }));
+    assert.equal(r.ok, true);
+    assert.equal(r.targets.length, 1);
+    assert.equal(r.subs.length, 1);
+    assert.deepEqual(r.options, { 'show-ok-icon': false });
+});
+
+test('Import: Zusammenführen über die Ziel-ID (Secrets bleiben, andere Ziele unberührt)', () => {
+    const a = { ...u.makeTarget('checkmk', 'A'), url: 'https://a' };
+    const b = { ...u.makeTarget('checkmk', 'B'), url: 'https://b' };
+    const subsA = [u.makeSubscription(a.id, '*'), u.makeSubscription(a.id, 'alt')];
+    const subsB = [u.makeSubscription(b.id, '*')];
+    const c = u.makeTarget('uptimekuma', 'C');
+    const imported = {
+        targets: [{ ...a, name: 'A neu' }, c],
+        subs: [u.makeSubscription(a.id, 'web'), u.makeSubscription(c.id, '*')],
+    };
+    const r = u.mergeImport([a, b], [...subsA, ...subsB], imported);
+    assert.equal(r.added, 1);
+    assert.equal(r.updated, 1);
+    assert.deepEqual(r.targets.map(t => t.name), ['A neu', 'B', 'C']);
+    assert.equal(r.targets[0].id, a.id);   // gleiche ID → gleiches Secret im Schlüsselbund
+    assert.deepEqual(r.subs.filter(s => s.target === a.id).map(s => s.host), ['web']);
+    assert.equal(r.subs.filter(s => s.target === b.id).length, 1);
+    // Rundreise: Export → Import ergibt dieselben Daten
+    const round = u.parseImport(u.buildExport({ targets: r.targets, subs: r.subs }));
+    assert.deepEqual(round.targets, r.targets);
+    assert.deepEqual(round.subs.map(s => s.id).sort(), r.subs.map(s => s.id).sort());
+});
+
+// ---------------------------------------------------------------------------
 // Sonstiges
 // ---------------------------------------------------------------------------
 

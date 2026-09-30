@@ -227,7 +227,9 @@ export default class MonBarExtension extends Extension {
 
         this._indicator = new MonIndicator(this);
         const position = this._settings.get_string('panel-position') || 'right';
-        Main.panel.addToStatusArea(this.uuid, this._indicator, 0, position);
+        // Links hinten anhängen (hinter „Aktivitäten“ und bereits vorhandene Symbole,
+        // z. B. snmpbar), in der Mitte und rechts wie gewohnt vorne
+        Main.panel.addToStatusArea(this.uuid, this._indicator, position === 'left' ? -1 : 0, position);
     }
 
     _repositionIndicator() {
@@ -499,9 +501,12 @@ export default class MonBarExtension extends Extension {
         if (!r)
             return;
         this._settings.set_string('subscriptions', serializeSubscriptions(r.subs));
+        const sub = r.subs.find(s => s.id === r.subId);
+        const target = parseTargets(this._settings.get_string('targets')).find(t => t.id === problem.target);
+        const where = sub?.host === '*' ? 'Alle Server' : sub?.host ?? problem.host;
         try {
             Main.notify('Meldung wird ignoriert',
-                `Muster „${r.pattern}“ – in den Einstellungen unter „Abos“ wieder entfernbar.`);
+                `Muster „${r.pattern}“ – wieder anzeigen unter Einstellungen → Ziele → ${target?.name ?? 'Ziel'} → ${where} → Ignorieren.`);
         } catch (_e) {
             // egal
         }

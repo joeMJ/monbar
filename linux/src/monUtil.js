@@ -268,6 +268,114 @@ export function makeSubscription(targetId, host = ALL_HOSTS) {
 }
 
 // ---------------------------------------------------------------------------
+// Export / Import der Konfiguration (ohne Secrets)
+// ---------------------------------------------------------------------------
+
+export const EXPORT_FORMAT = 'monbar-export';
+export const EXPORT_VERSION = 1;
+
+/**
+ * Allgemeine Einstellungen, die mit exportiert werden: Schlüssel → Typ bzw. erlaubte Werte.
+ * Zugangsdaten, Update-Adressen und interne Zähler gehören bewusst nicht dazu.
+ */
+export const EXPORT_OPTIONS = {
+    'panel-position': ['left', 'center', 'right'],
+    'show-ok-icon': 'boolean',
+    'show-acknowledged': 'boolean',
+    'show-downtime': 'boolean',
+    'hard-states-only': 'boolean',
+    'notify-enabled': 'boolean',
+    'notify-min-severity': ['crit', 'warn'],
+};
+
+function validOption(key, value) {
+    const rule = EXPORT_OPTIONS[key];
+    if (rule === 'boolean')
+        return typeof value === 'boolean';
+    return Array.isArray(rule) && rule.includes(value);
+}
+
+/**
+ * Baut die Export-Datei. Secrets liegen nur im Schlüsselbund und sind in den
+ * Ziel-Daten gar nicht enthalten; serializeTargets() schreibt nur bekannte Felder.
+ */
+export function buildExport({ targets, subs, options = {}, versionName = '', now = new Date() }) {
+    const cleanOptions = {};
+    for (const [key, value] of Object.entries(options)) {
+        if (validOption(key, value))
+            cleanOptions[key] = value;
+    }
+    return JSON.stringify({
+        format: EXPORT_FORMAT,
+        version: EXPORT_VERSION,
+        exported: now.toISOString(),
+        monbar: versionName,
+        note: 'Ziele und Abos ohne Zugangsdaten. Secrets nach dem Import auf einem anderen Rechner neu eintragen.',
+        targets: JSON.parse(serializeTargets(targets)),
+        subscriptions: JSON.parse(serializeSubscriptions(subs.filter(s => targets.some(t => t.id === s.target)))),
+        options: cleanOptions,
+    }, null, 2);
+}
+
+/**
+ * Liest eine Export-Datei. Ungültige Einträge werden verworfen; Abos ohne
+ * zugehöriges Ziel in der Datei ebenso.
+ * @returns {{ok: true, targets, subs, options} | {ok: false, error: string}}
+ */
+export function parseImport(text) {
+    let data;
+    try {
+        data = JSON.parse(text);
+    } catch (_e) {
+        return { ok: false, error: 'Die Datei ist kein gültiges JSON' };
+    }
+    if (!isPlainObject(data) || data.format !== EXPORT_FORMAT)
+        return { ok: false, error: 'Keine monbar-Exportdatei' };
+    if (!Number.isInteger(data.version) || data.version > EXPORT_VERSION)
+        return { ok: false, error: `Die Datei stammt aus einer neueren monbar-Version (Format ${data.version})` };
+
+    const targets = parseTargets(JSON.stringify(data.targets ?? []));
+    const ids = new Set(targets.map(t => t.id));
+    const subs = parseSubscriptions(JSON.stringify(data.subscriptions ?? [])).filter(s => ids.has(s.target));
+    const options = {};
+    if (isPlainObject(data.options)) {
+        for (const [key, value] of Object.entries(data.options)) {
+            if (validOption(key, value))
+                options[key] = value;
+        }
+    }
+    if (targets.length === 0 && Object.keys(options).length === 0)
+        return { ok: false, error: 'Die Datei enthält keine Ziele' };
+    return { ok: true, targets, subs, options };
+}
+
+/**
+ * Führt importierte Ziele mit den vorhandenen zusammen, über die Ziel-ID:
+ * gleiche ID → Ziel und seine Abos werden ersetzt (das Secret im Schlüsselbund
+ * bleibt, es hängt an der ID), neue ID → hinzugefügt, alle anderen bleiben unverändert.
+ * @returns {{targets, subs, added: number, updated: number}}
+ */
+export function mergeImport(existingTargets, existingSubs, imported) {
+    const importedIds = new Set(imported.targets.map(t => t.id));
+    let updated = 0;
+    const targets = existingTargets.map(t => {
+        if (!importedIds.has(t.id))
+            return t;
+        updated++;
+        return imported.targets.find(x => x.id === t.id);
+    });
+    const existingIds = new Set(existingTargets.map(t => t.id));
+    const fresh = imported.targets.filter(t => !existingIds.has(t.id));
+    const mergedTargets = [...targets, ...fresh].slice(0, MAX_TARGETS);
+    const kept = new Set(mergedTargets.map(t => t.id));
+    const subs = [
+        ...existingSubs.filter(s => !importedIds.has(s.target)),
+        ...imported.subs,
+    ].filter(s => kept.has(s.target)).slice(0, MAX_SUBS);
+    return { targets: mergedTargets, subs, added: fresh.length, updated };
+}
+
+// ---------------------------------------------------------------------------
 // Ignorier-Muster: * = beliebig viele Zeichen, ? = genau ein Zeichen,
 // \* und \? stehen für die Zeichen selbst. Groß-/Kleinschreibung egal.
 // ---------------------------------------------------------------------------

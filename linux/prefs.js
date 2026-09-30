@@ -16,7 +16,7 @@ import {
     typeIds, getType, fieldLabel, hasCapability, getIntervalChoices,
     parseTargets, serializeTargets, makeTarget, parseSubscriptions, serializeSubscriptions,
     makeSubscription, secretName, normalizeUrl, isValidSite, targetProblem, effectiveInterval,
-    isValidPattern, ALL_HOSTS,
+    isValidPattern, ALL_HOSTS, EXPORT_OPTIONS, buildExport, parseImport, mergeImport,
 } from './src/monUtil.js';
 
 const esc = text => GLib.markup_escape_text(String(text ?? ''), -1);
@@ -867,6 +867,8 @@ export default class MonBarPreferences extends ExtensionPreferences {
             return false;
         });
 
+        const installedNameEarly = this.metadata['version-name'] ?? String(this.metadata.version || 1);
+
         // ==========================================
         // Seite 2: Allgemein
         // ==========================================
@@ -882,16 +884,17 @@ export default class MonBarPreferences extends ExtensionPreferences {
         });
         pageGeneral.add(groupPanel);
 
+        const positions = ['left', 'center', 'right'];
         const positionRow = new Adw.ComboRow({
             title: 'Position im Panel',
             subtitle: 'Wähle den Anzeigeort in der oberen Leiste',
             model: new Gtk.StringList({
-                strings: ['Mitte (neben Datum/Uhrzeit)', 'Rechts (neben Quick Settings)'],
+                strings: ['Links (neben Aktivitäten)', 'Mitte (neben Datum/Uhrzeit)', 'Rechts (neben Quick Settings)'],
             }),
         });
-        positionRow.selected = settings.get_string('panel-position') === 'center' ? 0 : 1;
+        positionRow.selected = Math.max(0, positions.indexOf(settings.get_string('panel-position')));
         positionRow.connect('notify::selected', () => {
-            settings.set_string('panel-position', positionRow.selected === 0 ? 'center' : 'right');
+            settings.set_string('panel-position', positions[positionRow.selected] ?? 'right');
         });
         groupPanel.add(positionRow);
 
@@ -929,6 +932,138 @@ export default class MonBarPreferences extends ExtensionPreferences {
         });
         settings.bind('notify-enabled', severityRow, 'sensitive', Gio.SettingsBindFlags.GET);
         groupNotify.add(severityRow);
+
+        // --- Sichern und übertragen ---
+        const groupBackup = new Adw.PreferencesGroup({
+            title: 'Sichern und übertragen',
+            description: 'Ziele, Abos, Ignorierlisten und diese allgemeinen Einstellungen als JSON-Datei. Secrets werden nie exportiert – sie bleiben im Schlüsselbund. Beim Import auf einem anderen Rechner die Secrets der Ziele neu eintragen.',
+        });
+        pageGeneral.add(groupBackup);
+
+        const jsonFilters = () => {
+            const filter = new Gtk.FileFilter({ name: 'JSON-Dateien' });
+            filter.add_pattern('*.json');
+            filter.add_mime_type('application/json');
+            const store = new Gio.ListStore({ item_type: Gtk.FileFilter.$gtype });
+            store.append(filter);
+            return store;
+        };
+        const dismissed = e => e.matches?.(Gtk.DialogError, Gtk.DialogError.DISMISSED)
+            || e.matches?.(Gtk.DialogError, Gtk.DialogError.CANCELLED);
+
+        const exportRow = new Adw.ActionRow({
+            title: 'Exportieren',
+            subtitle: 'Speichert die Konfiguration ohne Secrets',
+        });
+        const exportBtn = new Gtk.Button({ label: 'Exportieren …', valign: Gtk.Align.CENTER });
+        exportBtn.connect('clicked', async () => {
+            await flushPending();
+            const today = new Date();
+            const stamp = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+            const dialog = new Gtk.FileDialog({
+                title: 'monbar-Konfiguration exportieren',
+                initial_name: `monbar-${stamp}.json`,
+                modal: true,
+                filters: jsonFilters(),
+            });
+            dialog.save(window, null, (_d, res) => {
+                let file;
+                try {
+                    file = dialog.save_finish(res);
+                } catch (e) {
+                    if (!dismissed(e))
+                        exportRow.subtitle = `Speichern fehlgeschlagen: ${esc(e.message)}`;
+                    return;
+                }
+                try {
+                    const options = {};
+                    for (const [key, rule] of Object.entries(EXPORT_OPTIONS))
+                        options[key] = rule === 'boolean' ? settings.get_boolean(key) : settings.get_string(key);
+                    const targets = loadTargets();
+                    const text = buildExport({
+                        targets, subs: loadSubs(), options, versionName: installedNameEarly,
+                    });
+                    file.replace_contents(new TextEncoder().encode(text), null, false,
+                        Gio.FileCreateFlags.REPLACE_DESTINATION, null);
+                    exportRow.subtitle = esc(`${targets.length} Ziel${targets.length === 1 ? '' : 'e'} gespeichert: ${file.get_path() ?? file.get_uri()}`);
+                } catch (e) {
+                    exportRow.subtitle = `Speichern fehlgeschlagen: ${esc(e.message)}`;
+                }
+            });
+        });
+        exportRow.add_suffix(exportBtn);
+        exportRow.activatable_widget = exportBtn;
+        groupBackup.add(exportRow);
+
+        const importOptionsRow = new Adw.SwitchRow({
+            title: 'Allgemeine Einstellungen mit importieren',
+            subtitle: 'Position, Filter und Benachrichtigungen aus der Datei übernehmen',
+            active: true,
+        });
+
+        const importRow = new Adw.ActionRow({
+            title: 'Importieren',
+            subtitle: 'Gleiche Ziele (aus einem früheren Export) werden ersetzt und behalten ihr Secret, neue kommen hinzu, alle anderen bleiben unverändert',
+        });
+        const importBtn = new Gtk.Button({ label: 'Importieren …', valign: Gtk.Align.CENTER });
+        importBtn.connect('clicked', async () => {
+            await flushPending();
+            const dialog = new Gtk.FileDialog({
+                title: 'monbar-Konfiguration importieren',
+                modal: true,
+                filters: jsonFilters(),
+            });
+            dialog.open(window, null, (_d, res) => {
+                let file;
+                try {
+                    file = dialog.open_finish(res);
+                } catch (e) {
+                    if (!dismissed(e))
+                        importRow.subtitle = `Öffnen fehlgeschlagen: ${esc(e.message)}`;
+                    return;
+                }
+                try {
+                    const [, contents] = file.load_contents(null);
+                    if (contents.length > 2 * 1024 * 1024)
+                        throw new Error('Die Datei ist unerwartet groß');
+                    const imported = parseImport(new TextDecoder('utf-8').decode(contents));
+                    if (!imported.ok) {
+                        importRow.subtitle = esc(`Import abgelehnt: ${imported.error}`);
+                        return;
+                    }
+                    const merged = mergeImport(loadTargets(), loadSubs(), imported);
+                    saveTargets(merged.targets);
+                    saveSubs(merged.subs);
+
+                    let optionsApplied = 0;
+                    if (importOptionsRow.active) {
+                        for (const [key, value] of Object.entries(imported.options)) {
+                            if (EXPORT_OPTIONS[key] === 'boolean')
+                                settings.set_boolean(key, value);
+                            else
+                                settings.set_string(key, value);
+                            optionsApplied++;
+                        }
+                        positionRow.selected = Math.max(0, positions.indexOf(settings.get_string('panel-position')));
+                        severityRow.selected = settings.get_string('notify-min-severity') === 'warn' ? 1 : 0;
+                    }
+
+                    renderOverview();
+                    for (const render of openRenderers)
+                        render();
+                    const parts = [`${merged.added} neu`, `${merged.updated} ersetzt`];
+                    if (optionsApplied > 0)
+                        parts.push('allgemeine Einstellungen übernommen');
+                    importRow.subtitle = esc(`Importiert: ${parts.join(', ')}. Secrets neuer Ziele unter „Ziele“ eintragen.`);
+                } catch (e) {
+                    importRow.subtitle = `Import fehlgeschlagen: ${esc(e.message)}`;
+                }
+            });
+        });
+        importRow.add_suffix(importBtn);
+        importRow.activatable_widget = importBtn;
+        groupBackup.add(importRow);
+        groupBackup.add(importOptionsRow);
 
         // ==========================================
         // Seite 3: Updates

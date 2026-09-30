@@ -20,7 +20,7 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | In Entwicklung (v0.2) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
+| **Linux (GNOME Shell)** | In Entwicklung (v0.3) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
 
 ---
 
@@ -29,6 +29,7 @@
 * **Statusleiste:**
   * Pulssymbol mit **roter Zahl für Störungen** (CRIT, DOWN, UNREACH) und **gelber Zahl für Warnungen** (WARN, UNKNOWN, PENDING, Zertifikat läuft bald ab).
   * Wahlweise nur sichtbar, wenn es etwas zu melden gibt.
+  * Position links (neben „Aktivitäten“ und anderen Extensions wie snmpbar), in der Mitte oder rechts.
 
 * **Popup (bei Klick auf das Symbol):**
   * Eine Karte je Meldung: Server, Dienst oder Log-Meldung, Status, Dauer, Ausgabe des Checks.
@@ -132,7 +133,10 @@ Update mit `./update.sh` (führt `git pull` aus), Deinstallation mit `./uninstal
 
 * **Ziele** – Übersicht aller Ziele. Ein Klick öffnet die Seite des Ziels mit den Abschnitten *Allgemein*, *Verbindung*, *Zugangsdaten*, *Abos* und *Server abonnieren*.
 * **Seite eines Servers** (Klick auf ein Abo) – *Dienste* (alle, ausgewählte oder keine), *Log-Meldungen* (Event Console) und *Ignorieren*.
-* **Allgemein** – Anzeige, Filter, Benachrichtigungen. **Updates** – Programm und Zielarten-Datenbank.
+* **Allgemein** – Anzeige, Filter, Benachrichtigungen sowie **Export und Import** der Konfiguration als JSON (Ziele, Abos, Ignorierlisten, allgemeine Einstellungen – **ohne Secrets**). Beim Import werden Ziele aus einem früheren Export anhand ihrer ID ersetzt und behalten ihr Secret; neue Ziele kommen hinzu.
+* **Updates** – Programm und Zielarten-Datenbank.
+
+Ignorierte Meldungen findest du unter *Ziele → Ziel → Server (oder „Alle Server“) → Ignorieren*; dort lassen sie sich mit dem Papierkorb wieder einblenden.
 
 Neue Ziele abonnieren automatisch **Alle Server**. Log-Dienste wie „Log System“ zeigen im Popup nur die gemeldete Log-Zeile; der Ignorieren-Knopf blendet dann genau diese Meldung aus, nicht das ganze Log.
 

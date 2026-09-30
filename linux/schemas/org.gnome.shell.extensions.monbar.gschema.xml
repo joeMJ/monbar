@@ -24,12 +24,13 @@
     <!-- Anzeige -->
     <key name="panel-position" type="s">
       <choices>
+        <choice value="left"/>
         <choice value="center"/>
         <choice value="right"/>
       </choices>
       <default>'right'</default>
       <summary>Position im Panel</summary>
-      <description>Platzierung des Icons: 'center' (neben Uhrzeit) oder 'right' (neben Netzwerk/Quick Settings).</description>
+      <description>Platzierung des Icons: 'left' (links, hinter Aktivitäten und anderen Extensions), 'center' (neben Uhrzeit) oder 'right' (neben Netzwerk/Quick Settings).</description>
     </key>
 
     <key name="show-ok-icon" type="b">
