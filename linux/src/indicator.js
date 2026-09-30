@@ -200,7 +200,8 @@ class MonIndicator extends PanelMenu.Button {
         });
         refreshBtn.connect('clicked', () => {
             this._footerStatusLabel.text = 'Aktualisiere...';
-            this._extension.refreshData({ force: true, manual: true });
+            this._extension.refreshData({ force: true, manual: true })
+                .catch(e => console.warn(`[monbar] Aktualisieren fehlgeschlagen: ${e}\n${e?.stack ?? ''}`));
         });
         this._footerBox.add_child(refreshBtn);
 

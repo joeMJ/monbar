@@ -346,8 +346,15 @@ export default class MonBarExtension extends Extension {
      * @param {object} [opts]
      * @param {boolean} [opts.force]  alle aktiven Ziele abfragen, unabhängig vom Intervall
      * @param {boolean} [opts.manual] per Knopfdruck ausgelöst (mindestens 10 s Abstand)
+     * @returns {Promise<void>} wird nie abgelehnt – Fehler landen mit Stack im Journal
      */
-    async refreshData(opts = {}) {
+    refreshData(opts = {}) {
+        return this._refreshData(opts).catch(e => {
+            console.warn(`[monbar] Fehler bei der Abfrage: ${e}\n${e?.stack ?? ''}`);
+        });
+    }
+
+    async _refreshData(opts = {}) {
         if (!this._settings || !this._indicator)
             return;
 
@@ -417,7 +424,7 @@ export default class MonBarExtension extends Extension {
                 this._settings.set_int('target-db-revision', this._settings.get_int('target-db-revision') + 1);
             }
         } catch (e) {
-            console.warn(`[monbar] Error in refreshData: ${e.message}`);
+            console.warn(`[monbar] Error in refreshData: ${e}\n${e?.stack ?? ''}`);
             this._scheduleRetry(120);
         } finally {
             this._refreshing = false;
@@ -515,6 +522,14 @@ export default class MonBarExtension extends Extension {
     _applyDataToUI() {
         if (!this._indicator || !this._settings)
             return;
+        try {
+            this._updateIndicator();
+        } catch (e) {
+            console.warn(`[monbar] Anzeige konnte nicht aktualisiert werden: ${e}\n${e?.stack ?? ''}`);
+        }
+    }
+
+    _updateIndicator() {
 
         const targets = parseTargets(this._settings.get_string('targets'));
         const subs = parseSubscriptions(this._settings.get_string('subscriptions'));
