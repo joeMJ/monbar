@@ -20,7 +20,7 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | In Entwicklung (v0.4) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
+| **Linux (GNOME Shell)** | In Entwicklung (v0.5) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
 
 ---
 

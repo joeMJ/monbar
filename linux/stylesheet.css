@@ -41,6 +41,11 @@
     opacity: 0.5;
 }
 
+/* Kein Ziel liefert Daten: Warnfarbe statt gedimmt */
+.monbar-panel-unreach .monbar-panel-icon {
+    color: #f8e45c;
+}
+
 /* Popup Menü */
 .monbar-menu {
     /* Feste Breite: GNOME Shell berechnet die Höhe umbrechender Texte sonst falsch,
@@ -213,8 +218,30 @@
     padding: 10px 4px;
 }
 
-.monbar-ok-icon {
+.monbar-empty-ok .monbar-ok-icon {
     color: #57e389;
+}
+
+.monbar-empty-warn .monbar-ok-icon,
+.monbar-empty-partial .monbar-ok-icon {
+    color: #f8e45c;
+}
+
+.monbar-empty-warn .monbar-empty-text {
+    opacity: 0.9;
+    font-weight: 600;
+}
+
+.monbar-empty-wait .monbar-ok-icon {
+    opacity: 0.6;
+}
+
+.monbar-empty-text {
+    max-width: 360px;
+}
+
+.monbar-summary-warn {
+    color: #f8e45c;
 }
 
 /* Footer */

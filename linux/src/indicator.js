@@ -28,6 +28,7 @@ const SEVERITY_ICONS = {
 const HINT_TEXTS = {
     config: msg => `Einstellungen unvollständig – ${msg}`,
     locked: () => 'Schlüsselbund gesperrt – wird abgefragt, sobald er entsperrt ist.',
+    keyring: () => 'Schlüsselbund nicht lesbar – neuer Versuch in Kürze.',
     nokey: () => 'Kein Secret hinterlegt – bitte in den Einstellungen eintragen.',
     auth: () => 'Zugangsdaten werden abgelehnt – Benutzer und Secret prüfen.',
     notfound: msg => msg || 'Adresse nicht gefunden – Server-URL (und Instanz) prüfen.',
@@ -347,19 +348,26 @@ class MonIndicator extends PanelMenu.Button {
     updateUI({ items, status, configured, isOffline = false, lastTimestamp = null, updateStatus = null }) {
         const { crit, warn } = summarize(items);
         const errors = status.filter(s => s.error);
+        // Kein einziges Ziel liefert Daten – das ist ein Warnzustand, kein „alles in Ordnung“
+        const allFailed = status.length > 0 && errors.length === status.length;
+        const someFailed = errors.length > 0 && !allFailed;
+        const waiting = status.length > 0 && !status.some(s => s.fetched);
+        const keyringWait = allFailed && errors.every(s => s.error.kind === 'keyring' || s.error.kind === 'locked');
 
         // Panel
         this._setLabel(this._critLabel, crit);
         this._setLabel(this._warnLabel, warn);
-        for (const c of ['monbar-panel-crit', 'monbar-panel-warn', 'monbar-panel-error', 'monbar-panel-idle'])
+        for (const c of ['monbar-panel-crit', 'monbar-panel-warn', 'monbar-panel-unreach', 'monbar-panel-error', 'monbar-panel-idle'])
             this._panelBox.remove_style_class_name(c);
         if (crit > 0)
             this._panelBox.add_style_class_name('monbar-panel-crit');
         else if (warn > 0)
             this._panelBox.add_style_class_name('monbar-panel-warn');
-        else if (errors.length > 0)
+        else if (allFailed)
+            this._panelBox.add_style_class_name('monbar-panel-unreach');
+        else if (someFailed)
             this._panelBox.add_style_class_name('monbar-panel-error');
-        else if (!configured)
+        else if (!configured || waiting)
             this._panelBox.add_style_class_name('monbar-panel-idle');
 
         const quiet = crit === 0 && warn === 0 && errors.length === 0;
@@ -371,8 +379,17 @@ class MonIndicator extends PanelMenu.Button {
             summary.push(`${crit} ${crit === 1 ? 'Störung' : 'Störungen'}`);
         if (warn > 0)
             summary.push(`${warn} ${warn === 1 ? 'Warnung' : 'Warnungen'}`);
-        this._summaryLabel.text = summary.length > 0 ? summary.join(' • ')
-            : configured && status.some(s => s.fetched && !s.error) ? 'Alles in Ordnung' : '';
+        if (summary.length > 0)
+            this._summaryLabel.text = summary.join(' • ');
+        else if (allFailed)
+            this._summaryLabel.text = keyringWait ? 'Warte auf Schlüsselbund' : 'Keine Verbindung';
+        else if (someFailed)
+            this._summaryLabel.text = `${status.length - errors.length} von ${status.length} Zielen erreichbar`;
+        else
+            this._summaryLabel.text = configured && status.some(s => s.fetched) ? 'Alles in Ordnung' : '';
+        this._summaryLabel.remove_style_class_name('monbar-summary-warn');
+        if (summary.length === 0 && errors.length > 0)
+            this._summaryLabel.add_style_class_name('monbar-summary-warn');
 
         // Hinweise je Ziel
         this._hintBox.destroy_all_children();
@@ -381,7 +398,7 @@ class MonIndicator extends PanelMenu.Button {
             if (s.error)
                 hints.push(`${s.target.name}: ${hintText(s.error)}${s.stale ? ' Angezeigt wird der letzte bekannte Stand.' : ''}`);
             else if (s.notes.includes('nosubs'))
-                hints.push(`${s.target.name}: Noch nichts abonniert – in den Einstellungen unter „Abos“ Server auswählen.`);
+                hints.push(`${s.target.name}: Noch nichts abonniert – in den Einstellungen unter Ziele → ${s.target.name} → „Server abonnieren“.`);
             else if (s.notes.includes('events-unsupported'))
                 hints.push(`${s.target.name}: Log-Meldungen (Event Console) sind auf diesem Server nicht verfügbar.`);
         }
@@ -413,22 +430,45 @@ class MonIndicator extends PanelMenu.Button {
                 x_align: Clutter.ActorAlign.CENTER,
             }));
         } else if (items.length === 0) {
+            // Leerer Zustand: nur dann ein grüner Haken, wenn wirklich alle Ziele geantwortet haben
+            let state;
+            if (allFailed) {
+                state = {
+                    icon: keyringWait ? 'dialog-password-symbolic' : 'dialog-warning-symbolic',
+                    cls: 'monbar-empty-warn',
+                    text: keyringWait ? 'Warte auf den Schlüsselbund – neuer Versuch in Kürze'
+                        : status.length === 1 ? 'Ziel nicht erreichbar – kein aktueller Stand'
+                            : 'Kein Ziel erreichbar – kein aktueller Stand',
+                };
+            } else if (waiting) {
+                state = { icon: 'content-loading-symbolic', cls: 'monbar-empty-wait', text: 'Wird abgefragt …' };
+            } else if (someFailed) {
+                state = {
+                    icon: 'dialog-warning-symbolic',
+                    cls: 'monbar-empty-partial',
+                    text: `Keine Störungen bei ${status.length - errors.length} von ${status.length} Zielen – die übrigen sind nicht erreichbar`,
+                };
+            } else {
+                state = { icon: 'emblem-ok-symbolic', cls: 'monbar-empty-ok', text: 'Keine Störungen oder Warnungen' };
+            }
             const okBox = new St.BoxLayout({
-                style_class: 'monbar-ok-box',
+                style_class: `monbar-ok-box ${state.cls}`,
                 x_align: Clutter.ActorAlign.CENTER,
             });
             okBox.add_child(new St.Icon({
-                icon_name: 'emblem-ok-symbolic',
+                icon_name: state.icon,
                 icon_size: 20,
                 style_class: 'monbar-ok-icon',
-            }));
-            okBox.add_child(new St.Label({
-                text: errors.length === status.length && errors.length > 0
-                    ? 'Kein Ziel erreichbar'
-                    : 'Keine Störungen oder Warnungen',
-                style_class: 'monbar-empty-placeholder',
                 y_align: Clutter.ActorAlign.CENTER,
             }));
+            const stateLabel = new St.Label({
+                text: state.text,
+                style_class: 'monbar-empty-placeholder monbar-empty-text',
+                y_align: Clutter.ActorAlign.CENTER,
+            });
+            stateLabel.clutter_text.line_wrap = true;
+            stateLabel.clutter_text.ellipsize = Pango.EllipsizeMode.NONE;
+            okBox.add_child(stateLabel);
             this._listBox.add_child(okBox);
         } else {
             for (const p of items.slice(0, MAX_CARDS))

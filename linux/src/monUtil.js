@@ -163,6 +163,30 @@ export function targetProblem(target) {
     return null;
 }
 
+/**
+ * Was tun, wenn für ein Ziel kein Secret gelesen werden konnte?
+ *
+ * Direkt nach dem Anmelden (besonders per FIDO-Stick) ist der Secret Service oft noch
+ * nicht bereit: Die Abfrage wirft, läuft in die Zeitüberschreitung oder findet noch
+ * nichts. Das darf nicht als „kein Secret hinterlegt“ stehen bleiben, sondern muss von
+ * selbst erneut versucht werden.
+ *
+ * @param {{locked?: boolean, error?: string|null, inGrace?: boolean}} r
+ *   inGrace: noch in der Anlaufphase nach dem Anmelden
+ * @returns {{kind: 'keyring'|'locked'|'nokey', message: string, retrySeconds: number|null}}
+ */
+export function secretFailure({ locked = false, error = null, inGrace = false }) {
+    const retry = inGrace ? 30 : 60;
+    if (error)
+        return { kind: 'keyring', message: error, retrySeconds: retry };
+    if (locked)
+        return { kind: 'locked', message: '', retrySeconds: retry };
+    if (inGrace)
+        return { kind: 'keyring', message: 'Schlüsselbund antwortet noch nicht', retrySeconds: retry };
+    // Wirklich kein Secret: Neuer Versuch erst mit dem regulären Intervall bzw. nach dem Eintragen
+    return { kind: 'nokey', message: '', retrySeconds: null };
+}
+
 /** Abfrageintervall (Minuten) eines Ziels: eigene Einstellung oder Vorgabe der Zielart. */
 export function effectiveInterval(target, type = getType(target.type)) {
     const wanted = target.interval ?? type.defaultInterval ?? 2;

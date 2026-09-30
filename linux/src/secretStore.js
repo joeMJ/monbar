@@ -170,6 +170,19 @@ async function lookupNoPrompt(name, cancellable) {
 }
 
 /**
+ * Verwirft die zwischengespeicherte Verbindung zum Secret Service. libsecret teilt eine
+ * Verbindung pro Prozess; wurde sie beim Anmelden aufgebaut, bevor der Dienst bereit war,
+ * baut der nächste Zugriff so eine frische auf. Wirft nie.
+ */
+export function resetSecretService() {
+    try {
+        Secret.Service.disconnect();
+    } catch (_e) {
+        // egal – beim nächsten Zugriff wird ohnehin neu verbunden
+    }
+}
+
+/**
  * Liest einen Eintrag, ohne jemals einen Entsperr-Dialog auszulösen.
  * Wirft nie wegen eines gesperrten Schlüsselbunds, sondern meldet ihn.
  * @param {string} name

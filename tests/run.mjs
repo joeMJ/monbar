@@ -171,6 +171,22 @@ test('Intervall: eigene Wahl, Vorgabe der Zielart, Minimum', () => {
     assert.equal(u.isDue({ lastAttemptAt: 1e12 - 60000, intervalMin: 2, now: 1e12 }), false);
 });
 
+test('Schlüsselbund: Login-Race wird erneut versucht, echtes Fehlen nicht', () => {
+    // Secret Service wirft oder Zeitüberschreitung → immer erneut versuchen
+    assert.deepEqual(u.secretFailure({ error: 'Zeitüberschreitung beim Zugriff auf den Schlüsselbund' }),
+        { kind: 'keyring', message: 'Zeitüberschreitung beim Zugriff auf den Schlüsselbund', retrySeconds: 60 });
+    assert.equal(u.secretFailure({ error: 'x', inGrace: true }).retrySeconds, 30);
+    // Gesperrt → erneut versuchen
+    assert.equal(u.secretFailure({ locked: true }).kind, 'locked');
+    assert.equal(u.secretFailure({ locked: true }).retrySeconds, 60);
+    // Kurz nach dem Anmelden „nichts gefunden“ = noch nicht bereit, nicht „kein Secret“
+    const early = u.secretFailure({ inGrace: true });
+    assert.equal(early.kind, 'keyring');
+    assert.equal(early.retrySeconds, 30);
+    // Später wirklich nichts hinterlegt → Hinweis, kein Dauer-Retry
+    assert.deepEqual(u.secretFailure({}), { kind: 'nokey', message: '', retrySeconds: null });
+});
+
 // ---------------------------------------------------------------------------
 // Abos & Ignorieren
 // ---------------------------------------------------------------------------

@@ -10,18 +10,20 @@ import Gio from 'gi://Gio';
 import { MonIndicator } from './src/indicator.js';
 import { createDrivers, destroyDrivers } from './src/drivers.js';
 import { UpdateChecker } from './src/updater.js';
-import { lookupSecretNoPrompt } from './src/secretStore.js';
+import { lookupSecretNoPrompt, resetSecretService } from './src/secretStore.js';
 import { loadTargetTypes, updateTargetTypes } from './src/targetDb.js';
 import {
     getType, parseTargets, parseSubscriptions, serializeSubscriptions, secretName, targetProblem,
     effectiveInterval, isDue, queryPlan, filterProblems, sortProblems, newProblems, guiLink,
-    addIgnoreForProblem,
+    addIgnoreForProblem, secretFailure,
 } from './src/monUtil.js';
 
 const TICK_SECONDS = 30;
 const MANUAL_REFRESH_GAP_MS = 10 * 1000;
 const META_CHECK_MS = 60 * 60 * 1000;
 const MAX_NOTIFY_SINGLE = 3;
+// So lange nach dem Aktivieren gilt „kein Secret gefunden“ als „Schlüsselbund noch nicht bereit“
+const KEYRING_GRACE_MS = 3 * 60 * 1000;
 
 export default class MonBarExtension extends Extension {
     enable() {
@@ -33,6 +35,7 @@ export default class MonBarExtension extends Extension {
         this._drivers = createDrivers();
         this._updateChecker = new UpdateChecker(this.metadata.version || 1);
 
+        this._enabledAt = Date.now();
         this._results = new Map();       // Ziel-ID → letztes Ergebnis
         this._lastAttempt = new Map();   // Ziel-ID → letzter Abfrageversuch (ms)
         this._knownKeys = new Map();     // Ziel-ID → Schlüssel der zuletzt gezeigten Meldungen
@@ -259,16 +262,28 @@ export default class MonBarExtension extends Extension {
     /**
      * Liest ein Secret – niemals mit Entsperr-Dialog, da ein Dialog aus dem
      * Shell-Prozess GNOME Shell abstürzen lassen kann.
-     * @returns {Promise<{value: string|null, locked: boolean}>}
+     *
+     * Direkt nach dem Anmelden (besonders per FIDO-Stick) ist der Secret Service oft noch
+     * nicht bereit: Die Abfrage wirft, läuft in die Zeitüberschreitung oder findet (noch)
+     * nichts. Fehler kommen deshalb als `error` zurück, damit der Aufrufer es erneut versucht.
+     * @returns {Promise<{value: string|null, locked: boolean, error?: string}>}
      */
     async _getSecret(name) {
         try {
             return await lookupSecretNoPrompt(name, this._cancellable);
         } catch (e) {
-            if (!this._cancellable?.is_cancelled())
-                console.warn(`[monbar] Schlüsselbund nicht lesbar: ${e.message}`);
-            return { value: null, locked: false };
+            if (this._cancellable?.is_cancelled())
+                return { value: null, locked: false };
+            console.warn(`[monbar] Schlüsselbund nicht lesbar: ${e.message}`);
+            // Eine zu früh aufgebaute Verbindung zum Secret Service nicht weiterverwenden
+            resetSecretService();
+            return { value: null, locked: false, error: e.message || 'unbekannter Fehler' };
         }
+    }
+
+    /** Noch in der Anlaufphase nach dem Anmelden (Schlüsselbund evtl. noch nicht bereit)? */
+    _inKeyringGrace() {
+        return Date.now() - this._enabledAt < KEYRING_GRACE_MS;
     }
 
     // -----------------------------------------------------------------------
@@ -310,11 +325,14 @@ export default class MonBarExtension extends Extension {
         if (!driver)
             return fail('config', 'Kein Treiber für diese Zielart – monbar aktualisieren');
 
-        const { value: secret, locked } = await this._getSecret(secretName(target.id));
+        const { value: secret, locked, error } = await this._getSecret(secretName(target.id));
+        if (!this._results)
+            return;               // inzwischen deaktiviert
         if (!secret) {
-            if (locked)
-                this._scheduleRetry(60);   // ohne Dialog warten, bis der Schlüsselbund entsperrt ist
-            return fail(locked ? 'locked' : 'nokey');
+            const outcome = secretFailure({ locked, error, inGrace: this._inKeyringGrace() });
+            if (outcome.retrySeconds)
+                this._scheduleRetry(outcome.retrySeconds);   // ohne Dialog erneut versuchen
+            return fail(outcome.kind, outcome.message);
         }
 
         const res = await driver.fetchProblems(target, secret, plan,
