@@ -1,0 +1,16 @@
+{
+  "name": "monbar",
+  "description": "Störungen und Warnungen aus Monitoring-Systemen (Checkmk, Uptime Kuma) in der Top-Bar",
+  "uuid": "monbar@johnlose.de",
+  "shell-version": [
+    "46",
+    "47",
+    "48",
+    "49",
+    "50"
+  ],
+  "url": "https://github.com/joeMJ/monbar",
+  "version": 1,
+  "version-name": "0.1",
+  "settings-schema": "org.gnome.shell.extensions.monbar"
+}

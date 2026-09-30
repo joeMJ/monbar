@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.monbar" path="/org/gnome/shell/extensions/monbar/">
+
+    <!-- Ziele & Abos -->
+    <key name="targets" type="s">
+      <default>'[]'</default>
+      <summary>Ziele (JSON)</summary>
+      <description>Liste der Monitoring-Ziele als JSON-Array mit id, type, name, url, site, username, insecure, enabled und interval. Enthält keine Zugangsdaten – die Secrets liegen im GNOME-Schlüsselbund.</description>
+    </key>
+
+    <key name="subscriptions" type="s">
+      <default>'[]'</default>
+      <summary>Abos (JSON)</summary>
+      <description>Abonnierte Server je Ziel ('*' = alle) mit Dienst-Auswahl ('all', 'selected', 'none'), Log-Meldungen an/aus und Ignorierliste (Muster mit * und ?).</description>
+    </key>
+
+    <key name="secret-revision" type="i">
+      <default>0</default>
+      <summary>Änderungszähler für die Secrets im Schlüsselbund</summary>
+      <description>Wird von den Einstellungen hochgezählt, wenn ein Secret im Schlüsselbund geändert wurde, damit die Extension neu abfragt.</description>
+    </key>
+
+    <!-- Anzeige -->
+    <key name="panel-position" type="s">
+      <choices>
+        <choice value="center"/>
+        <choice value="right"/>
+      </choices>
+      <default>'right'</default>
+      <summary>Position im Panel</summary>
+      <description>Platzierung des Icons: 'center' (neben Uhrzeit) oder 'right' (neben Netzwerk/Quick Settings).</description>
+    </key>
+
+    <key name="show-ok-icon" type="b">
+      <default>true</default>
+      <summary>Icon auch ohne Meldungen zeigen</summary>
+      <description>Zeigt das Icon in der Leiste auch, wenn alles in Ordnung ist. Aus: Das Icon erscheint nur bei Störungen, Warnungen oder Verbindungsproblemen.</description>
+    </key>
+
+    <key name="show-acknowledged" type="b">
+      <default>false</default>
+      <summary>Quittierte Probleme anzeigen</summary>
+      <description>Zeigt auch Probleme, die im Monitoring bereits quittiert (acknowledged) wurden.</description>
+    </key>
+
+    <key name="show-downtime" type="b">
+      <default>false</default>
+      <summary>Probleme in Wartung anzeigen</summary>
+      <description>Zeigt auch Probleme von Hosts und Diensten in einer geplanten Wartungszeit (Downtime / Maintenance).</description>
+    </key>
+
+    <key name="hard-states-only" type="b">
+      <default>true</default>
+      <summary>Nur harte Zustände (Checkmk)</summary>
+      <description>Zeigt Service-Probleme erst, wenn Checkmk sie nach allen Wiederholungen bestätigt hat (Hard State).</description>
+    </key>
+
+    <!-- Benachrichtigungen -->
+    <key name="notify-enabled" type="b">
+      <default>true</default>
+      <summary>Benachrichtigung bei neuen Meldungen</summary>
+      <description>Meldet neu aufgetretene Probleme als GNOME-Benachrichtigung.</description>
+    </key>
+
+    <key name="notify-min-severity" type="s">
+      <choices>
+        <choice value="crit"/>
+        <choice value="warn"/>
+      </choices>
+      <default>'crit'</default>
+      <summary>Benachrichtigen ab</summary>
+      <description>'crit' = nur Störungen, 'warn' = auch Warnungen.</description>
+    </key>
+
+    <!-- Update Settings -->
+    <key name="update-check-enabled" type="b">
+      <default>true</default>
+      <summary>Aktualitätsprüfung aktiv</summary>
+      <description>Prüft regelmäßig auf neuere Versionen im Git-Repository.</description>
+    </key>
+
+    <key name="target-db-auto-update" type="b">
+      <default>true</default>
+      <summary>Zielarten-Datenbank automatisch aktualisieren</summary>
+      <description>Lädt stündlich eine neuere Zielarten-Datenbank aus dem Git-Repository. Das sind reine Daten, sie wirken sofort ohne Neuanmeldung.</description>
+    </key>
+
+    <key name="target-db-url" type="s">
+      <default>'https://raw.githubusercontent.com/joeMJ/monbar/main/linux/data/targets.json'</default>
+      <summary>URL der Zielarten-Datenbank</summary>
+      <description>HTTPS-URL der targets.json mit den Zielarten.</description>
+    </key>
+
+    <key name="target-db-revision" type="i">
+      <default>0</default>
+      <summary>Änderungszähler der Zielarten-Datenbank</summary>
+      <description>Wird hochgezählt, wenn eine neue Zielarten-Datenbank heruntergeladen wurde, damit Extension und Einstellungen sie neu laden.</description>
+    </key>
+
+    <key name="git-update-url" type="s">
+      <default>'https://github.com/joeMJ/monbar.git'</default>
+      <summary>Git Clone / Update URL</summary>
+      <description>Git-Remote-URL für Skript-Updates.</description>
+    </key>
+
+    <key name="git-raw-metadata-url" type="s">
+      <default>'https://raw.githubusercontent.com/joeMJ/monbar/main/linux/metadata.json'</default>
+      <summary>Git Raw Metadata URL</summary>
+      <description>HTTP(S)-URL zur Prüfung der neuesten metadata.json.</description>
+    </key>
+
+  </schema>
+</schemalist>

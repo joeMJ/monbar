@@ -1,0 +1,90 @@
+{
+  "schema": 1,
+  "version": 1,
+  "updated": "2026-09-30",
+  "intervals": [1, 2, 5, 10, 15, 30, 60],
+  "types": [
+    {
+      "id": "checkmk",
+      "name": "Checkmk",
+      "driver": "checkmk-rest",
+      "description": "Abfrage über die REST API (ab Checkmk 2.2). Hosts, Services und – falls genutzt – Meldungen der Event Console. Am besten einen eigenen Automationsbenutzer mit reinen Leserechten anlegen.",
+      "docsUrl": "https://docs.checkmk.com/latest/de/rest_api.html",
+      "fields": ["url", "site", "username", "secret"],
+      "labels": {
+        "url": "Server-URL",
+        "site": "Instanz (Site)",
+        "username": "Automationsbenutzer",
+        "secret": "Automation-Secret"
+      },
+      "hints": {
+        "url": "Adresse des Checkmk-Servers ohne Instanz, z. B. https://monitor.example.lan",
+        "site": "Name der Checkmk-Instanz, z. B. mysite (steht in der URL hinter dem Servernamen)",
+        "username": "Setup → Benutzer → Automationsbenutzer, z. B. monbar",
+        "secret": "Automation-Secret des Benutzers – wird im GNOME-Schlüsselbund gespeichert"
+      },
+      "capabilities": ["services", "events"],
+      "minInterval": 1,
+      "defaultInterval": 2,
+      "options": {
+        "apiVersions": ["v1", "1.0"]
+      },
+      "stateMap": {
+        "host": {
+          "0": { "severity": "ok", "label": "UP" },
+          "1": { "severity": "crit", "label": "DOWN" },
+          "2": { "severity": "crit", "label": "UNREACH" }
+        },
+        "service": {
+          "0": { "severity": "ok", "label": "OK" },
+          "1": { "severity": "warn", "label": "WARN" },
+          "2": { "severity": "crit", "label": "CRIT" },
+          "3": { "severity": "unknown", "label": "UNKNOWN" }
+        },
+        "event": {
+          "0": { "severity": "ok", "label": "OK" },
+          "1": { "severity": "warn", "label": "WARN" },
+          "2": { "severity": "crit", "label": "CRIT" },
+          "3": { "severity": "unknown", "label": "UNKNOWN" },
+          "ok": { "severity": "ok", "label": "OK" },
+          "warning": { "severity": "warn", "label": "WARN" },
+          "critical": { "severity": "crit", "label": "CRIT" },
+          "unknown": { "severity": "unknown", "label": "UNKNOWN" }
+        }
+      }
+    },
+    {
+      "id": "uptimekuma",
+      "name": "Uptime Kuma",
+      "driver": "prometheus-kuma",
+      "description": "Abfrage über den Prometheus-Endpunkt /metrics. Monitore werden nach Hostname bzw. Host der URL zu Servern gruppiert. API-Key unter Einstellungen → API-Keys anlegen.",
+      "docsUrl": "https://github.com/louislam/uptime-kuma/wiki/Prometheus-Integration",
+      "fields": ["url", "username", "secret"],
+      "labels": {
+        "url": "Server-URL",
+        "username": "Benutzer (nur ohne API-Key)",
+        "secret": "API-Key oder Passwort"
+      },
+      "hints": {
+        "url": "Adresse von Uptime Kuma, z. B. https://kuma.example.lan oder http://192.168.1.10:3001",
+        "username": "Leer lassen, wenn du einen API-Key verwendest. Nur nötig, wenn noch nie ein API-Key angelegt wurde.",
+        "secret": "API-Key (uk…) – wird im GNOME-Schlüsselbund gespeichert"
+      },
+      "capabilities": ["services"],
+      "minInterval": 1,
+      "defaultInterval": 1,
+      "options": {
+        "certWarnDays": 14,
+        "skipMonitorTypes": ["group"]
+      },
+      "stateMap": {
+        "service": {
+          "0": { "severity": "crit", "label": "DOWN" },
+          "1": { "severity": "ok", "label": "UP" },
+          "2": { "severity": "warn", "label": "PENDING" },
+          "3": { "severity": "maintenance", "label": "WARTUNG" }
+        }
+      }
+    }
+  ]
+}

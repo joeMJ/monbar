@@ -1,0 +1,237 @@
+/* stylesheet.css - Styling für monbar GNOME Shell Extension */
+
+/* Panel Bar */
+.monbar-panel-box {
+    spacing: 5px;
+    padding: 0 4px;
+    font-feature-settings: "tnum";
+}
+
+.monbar-panel-icon {
+    icon-size: 16px;
+}
+
+.monbar-panel-count {
+    font-weight: bold;
+    font-size: inherit;
+    border-radius: 7px;
+    padding: 0 5px;
+}
+
+.monbar-panel-count-crit {
+    background-color: rgba(224, 27, 36, 0.85);
+    color: #ffffff;
+}
+
+.monbar-panel-count-warn {
+    background-color: rgba(245, 194, 17, 0.9);
+    color: #241f31;
+}
+
+.monbar-panel-crit .monbar-panel-icon {
+    color: #ff7b63;
+}
+
+.monbar-panel-warn .monbar-panel-icon {
+    color: #f8e45c;
+}
+
+.monbar-panel-error .monbar-panel-icon,
+.monbar-panel-idle .monbar-panel-icon {
+    opacity: 0.5;
+}
+
+/* Popup Menü */
+.monbar-menu {
+    min-width: 440px;
+    max-width: 540px;
+}
+
+.monbar-content-box {
+    padding: 8px 12px;
+    spacing: 8px;
+}
+
+.monbar-scroll {
+    max-height: 520px;
+}
+
+/* Update Banner */
+.monbar-update-banner {
+    background-color: rgba(53, 132, 228, 0.22);
+    border: 1px solid rgba(53, 132, 228, 0.7);
+    border-radius: 8px;
+    padding: 6px 10px;
+    spacing: 8px;
+    margin-bottom: 4px;
+}
+
+.monbar-update-icon {
+    icon-size: 18px;
+    color: #3584e4;
+}
+
+.monbar-update-text {
+    font-size: 10pt;
+    font-weight: bold;
+    /* Schriftfarbe des Themes übernehmen: ein festes Weiß ist auf hellen Popups unlesbar */
+    color: inherit;
+}
+
+/* Hinweis Banner */
+.monbar-hint-list {
+    spacing: 6px;
+}
+
+.monbar-hint-banner {
+    background-color: rgba(245, 194, 17, 0.18);
+    border: 1px solid rgba(245, 194, 17, 0.55);
+    border-radius: 8px;
+    padding: 6px 10px;
+    spacing: 8px;
+}
+
+.monbar-hint-icon {
+    icon-size: 18px;
+    color: #f5c211;
+}
+
+.monbar-hint-text {
+    font-size: 9.5pt;
+    font-weight: 500;
+}
+
+/* Sektions-Titel */
+.monbar-section-title-box {
+    padding: 3px 0 2px 0;
+}
+
+.monbar-section-title {
+    font-size: 10pt;
+    font-weight: bold;
+    letter-spacing: 0.2px;
+    opacity: 0.75;
+}
+
+.monbar-section-summary {
+    font-size: 8.5pt;
+    font-weight: 600;
+    opacity: 0.85;
+}
+
+/* Meldungs-Karten */
+.monbar-list-box {
+    spacing: 6px;
+}
+
+.monbar-card {
+    background-color: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    spacing: 4px;
+    padding-right: 6px;
+}
+
+.monbar-card-main {
+    padding: 8px 10px;
+    border-radius: 10px;
+}
+
+.monbar-card-main:hover,
+.monbar-card-main:focus {
+    background-color: rgba(255, 255, 255, 0.06);
+}
+
+.monbar-card-row {
+    spacing: 12px;
+}
+
+.monbar-card-info {
+    spacing: 1px;
+}
+
+.monbar-card-title {
+    font-size: 11pt;
+    font-weight: bold;
+}
+
+.monbar-card-subtitle {
+    font-size: 8.5pt;
+    opacity: 0.6;
+}
+
+.monbar-card-status {
+    font-size: 9.5pt;
+    font-weight: 600;
+    margin-top: 2px;
+}
+
+.monbar-card-detail {
+    font-size: 8.5pt;
+    opacity: 0.75;
+}
+
+/* Schweregrade */
+.monbar-card-crit {
+    border-color: rgba(255, 123, 99, 0.6);
+}
+
+.monbar-card-crit .monbar-card-icon,
+.monbar-card-crit .monbar-card-status {
+    color: #ff7b63;
+}
+
+.monbar-card-warn .monbar-card-icon,
+.monbar-card-warn .monbar-card-status {
+    color: #f8e45c;
+}
+
+.monbar-card-unknown .monbar-card-icon,
+.monbar-card-unknown .monbar-card-status {
+    color: #dc8add;
+}
+
+.monbar-card-maintenance .monbar-card-icon,
+.monbar-card-maintenance .monbar-card-status {
+    color: #c0bfbc;
+}
+
+.monbar-ok-box {
+    spacing: 8px;
+    padding: 10px 4px;
+}
+
+.monbar-ok-icon {
+    color: #57e389;
+}
+
+/* Footer */
+.monbar-footer-box {
+    spacing: 8px;
+    padding-top: 4px;
+}
+
+.monbar-footer-text {
+    font-size: 9pt;
+    opacity: 0.6;
+}
+
+.monbar-icon-button {
+    padding: 5px 8px;
+    border-radius: 6px;
+}
+
+.monbar-ignore-button {
+    opacity: 0.6;
+}
+
+.monbar-ignore-button:hover,
+.monbar-ignore-button:focus {
+    opacity: 1;
+}
+
+.monbar-empty-placeholder {
+    font-size: 9.5pt;
+    opacity: 0.6;
+    padding: 10px 4px;
+}
