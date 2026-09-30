@@ -7,12 +7,12 @@
 > * **Keine Unterstützung:** Issues und Pull Requests werden nicht bearbeitet, Feature-Wünsche nicht umgesetzt. Bitte keine Issues eröffnen.
 > * **Keine Garantie:** Bereitstellung „wie besehen“, ohne jede Gewährleistung und Haftung. Nutzung auf eigenes Risiko.
 > * **Eigene Umgebung:** Entwickelt und getestet nur auf meinen eigenen Ubuntu-Rechnern (24.04 / 26.04, GNOME 46–50). Auf anderen Systemen kann es fehlschlagen.
-> * **Zugangsdaten & Netzwerk:** Die Extension läuft mit den Rechten deiner GNOME-Sitzung. Das Secret des CheckMK-Automationsbenutzers und der Uptime-Kuma-API-Key werden im GNOME-Schlüsselbund (libsecret) gespeichert – verschlüsselt, solange du abgemeldet bist; während der Sitzung können Programme deines Benutzers sie lesen. Verwende am besten einen eigenen CheckMK-Benutzer mit reinen Leserechten und einen eigenen Uptime-Kuma-API-Key. Sie ruft regelmäßig die REST API deiner CheckMK-Instanz, den `/metrics`-Endpunkt deiner Uptime-Kuma-Instanz, für die Update-Prüfung eine entfernte `metadata.json` und die Zielarten-Datenbank `targets.json` von GitHub ab. **Lies den Code, bevor du ihn installierst.**
+> * **Zugangsdaten & Netzwerk:** Die Extension läuft mit den Rechten deiner GNOME-Sitzung. Passwörter und API-Keys der Ziele (Checkmk, Uptime Kuma, Icinga 2, Nagios) werden im GNOME-Schlüsselbund (libsecret) gespeichert – verschlüsselt, solange du abgemeldet bist; während der Sitzung können Programme deines Benutzers sie lesen. Verwende am besten je System einen eigenen Benutzer bzw. Key mit reinen Leserechten. Sie ruft regelmäßig die Schnittstellen deiner Monitoring-Systeme ab (Checkmk REST API, Uptime Kuma `/metrics`, Icinga 2 REST API, Nagios JSON-CGI bzw. XI REST API), für die Update-Prüfung eine entfernte `metadata.json` und die Zielarten-Datenbank `targets.json` von GitHub ab. **Lies den Code, bevor du ihn installierst.**
 > * **Keine Updates zugesichert:** Es kann jederzeit ohne Ankündigung Änderungen, Brüche oder die Löschung des Repos geben. Gern selbst forken und anpassen.
 >
 > *Private hobby project, unmaintained, provided as-is. No support, no issues, no warranty. Fork it if you like.*
 
-> **Störungen und Warnungen aus Checkmk und Uptime Kuma auf einen Blick in der GNOME-Shell-Leiste**
+> **Störungen und Warnungen aus Checkmk, Uptime Kuma, Icinga 2 und Nagios auf einen Blick in der GNOME-Shell-Leiste**
 
 ---
 
@@ -20,14 +20,28 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | In Entwicklung (v0.6) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
+| **Linux (GNOME Shell)** | In Entwicklung (v0.7) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
+
+---
+
+## Unterstützte Monitoring-Systeme
+
+| System | Schnittstelle | Anmeldung | Log-Meldungen | Status |
+| :--- | :--- | :--- | :--- | :--- |
+| **Checkmk** (ab 2.2) | REST API `v1` / `1.0` | Automationsbenutzer + Secret | Event Console | im Einsatz |
+| **Uptime Kuma** | Prometheus `/metrics` | API-Key | – | im Einsatz |
+| **Icinga 2** | REST API `/v1/objects` (Port 5665) | ApiUser + Passwort | – | **experimentell** |
+| **Nagios Core** (ab 4.0.7) | JSON-CGI `statusjson.cgi` | Benutzer der Weboberfläche | – | **experimentell** |
+| **Nagios XI** | REST API `/nagiosxi/api/v1/objects` | API-Key | – | **experimentell** |
+
+*Experimentell* heißt: nach Dokumentation (bei Nagios Core zusätzlich nach Quellcode) gebaut und gegen nachgebaute Antworten getestet, aber noch an keinem echten System ausprobiert.
 
 ---
 
 ## Funktionen
 
 * **Statusleiste:**
-  * Pulssymbol mit **roter Zahl für Störungen** (CRIT, DOWN, UNREACH) und **gelber Zahl für Warnungen** (WARN, UNKNOWN, PENDING, Zertifikat läuft bald ab).
+  * Pulssymbol mit **roter Zahl für Störungen** (CRIT, DOWN, UNREACH) und **bernsteinfarbener Zahl für Warnungen** (WARN, UNKNOWN, PENDING, Zertifikat läuft bald ab).
   * Wahlweise nur sichtbar, wenn es etwas zu melden gibt.
   * Position links (neben „Aktivitäten“ und anderen Extensions wie snmpbar), in der Mitte oder rechts.
 
@@ -129,6 +143,28 @@ Update mit `./update.sh` (führt `git pull` aus), Deinstallation mit `./uninstal
 2. In monbar ein Ziel „Uptime Kuma“ mit **Server-URL** (z. B. `http://192.168.1.10:3001`) und dem **API-Key** anlegen. Das Benutzerfeld bleibt leer.
 3. Monitore werden nach Hostname bzw. Host der URL zu „Servern“ gruppiert, damit Abos und Ignorierlisten wie bei Checkmk funktionieren.
 
+### Icinga 2 (experimentell)
+
+1. Auf dem Icinga-Server die API aktivieren (`icinga2 api setup`) und einen Benutzer nur zum Lesen anlegen, z. B. in `/etc/icinga2/conf.d/api-users.conf`:
+   ```
+   object ApiUser "monbar" {
+     password = "…"
+     permissions = [ "objects/query/Host", "objects/query/Service" ]
+   }
+   ```
+2. In monbar ein Ziel „Icinga 2“ mit **API-URL** inklusive Port (z. B. `https://icinga.example.lan:5665`), **API-Benutzer** und **Passwort** anlegen. Das Zertifikat ist meist selbst signiert → „Zertifikat nicht prüfen“ einschalten.
+3. Optional **Icinga Web** eintragen (z. B. `https://icinga.example.lan/icingaweb2`), dann öffnet ein Klick auf eine Meldung sie dort.
+
+### Nagios Core (experimentell)
+
+1. Voraussetzung ist Nagios Core ab 4.0.7 (JSON-CGIs).
+2. In monbar ein Ziel „Nagios Core“ mit der **Adresse der Weboberfläche** ohne `/cgi-bin` (z. B. `https://server.example.lan/nagios`) sowie **Benutzer** und **Passwort** der Weboberfläche anlegen. Der Benutzer muss alle Hosts und Dienste sehen dürfen (`cgi.cfg`).
+
+### Nagios XI (experimentell)
+
+1. In XI den **API-Key** des Benutzers heraussuchen (*Help → API Docs* oder Benutzerprofil). Der Bereich „Objects“ der API ist nur lesend.
+2. In monbar ein Ziel „Nagios XI“ mit der **Adresse** (z. B. `https://xi.example.lan`, mit oder ohne `/nagiosxi`) und dem **API-Key** anlegen.
+
 ### Aufbau der Einstellungen
 
 * **Ziele** – Übersicht aller Ziele. Ein Klick öffnet die Seite des Ziels mit den Abschnitten *Allgemein*, *Verbindung*, *Zugangsdaten*, *Abos* und *Server abonnieren*.
@@ -147,7 +183,7 @@ Neue Ziele abonnieren automatisch **Alle Server**. Log-Dienste wie „Log System
 Die Zielarten-Datenbank enthält nur Daten: Namen, Felder, Status-Übersetzung, Intervalle. Der Programmcode, der ein System abfragt (der **Treiber**), ist fest in monbar hinterlegt; Adressen und Zugangsdaten kommen nie aus der Datenbank.
 
 * Eine Zielart, die einen **vorhandenen Treiber** nutzt, kommt per Datenbank-Update – ohne neue Version.
-* Ein System mit **neuem Protokoll** (z. B. Nagios) braucht einen neuen Treiber in [`linux/src/drivers.js`](linux/src/drivers.js) (Methoden `fetchProblems`, `test`, `listHosts`, `listServices`) plus Eintrag in `DRIVERS` ([`targetTypes.js`](linux/src/targetTypes.js)) und in der Datenbank.
+* Ein System mit **neuem Protokoll** braucht einen neuen Treiber in [`linux/src/drivers.js`](linux/src/drivers.js) (Methoden `fetchProblems`, `test`, `listHosts`, `listServices`) plus Eintrag in `DRIVERS` ([`targetTypes.js`](linux/src/targetTypes.js)) und in der Datenbank.
 
 ## Tests
 

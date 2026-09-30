@@ -342,7 +342,7 @@ export default class MonBarPreferences extends ExtensionPreferences {
                 gGeneral.add(intervalRow);
 
                 // ---------- Verbindung ----------
-                const connFields = type.fields.filter(f => f === 'url' || f === 'site');
+                const connFields = type.fields.filter(f => f === 'url' || f === 'site' || f === 'weburl');
                 const hintLines = connFields.filter(f => type.hints?.[f]).map(f => `${fieldLabel(type, f)}: ${type.hints[f]}`);
                 const gConn = section.add(new Adw.PreferencesGroup({
                     title: 'Verbindung',
@@ -367,7 +367,7 @@ export default class MonBarPreferences extends ExtensionPreferences {
                         show_apply_button: true,
                         tooltip_text: type.hints?.[field] ?? '',
                     });
-                    if (field === 'url')
+                    if (field === 'url' || field === 'weburl')
                         entry.input_purpose = Gtk.InputPurpose.URL;
                     const save = () => {
                         const value = entry.text.trim();
@@ -375,7 +375,7 @@ export default class MonBarPreferences extends ExtensionPreferences {
                         if (!current || value === (current[field] ?? ''))
                             return;
                         let clean = value;
-                        if (field === 'url' && value) {
+                        if ((field === 'url' || field === 'weburl') && value) {
                             clean = normalizeUrl(value);
                             if (!clean) {
                                 entry.add_css_class('error');
@@ -388,11 +388,10 @@ export default class MonBarPreferences extends ExtensionPreferences {
                         }
                         entry.remove_css_class('error');
                         updateTarget(targetId, { [field]: clean });
-                        if (field === 'url') {
-                            if (entry.text !== clean)
-                                entry.text = clean;
+                        if ((field === 'url' || field === 'weburl') && entry.text !== clean)
+                            entry.text = clean;
+                        if (field === 'url')
                             httpWarning.visible = /^http:\/\//i.test(clean);
-                        }
                     };
                     entry.connect('apply', save);
                     entry.connect('entry-activated', save);

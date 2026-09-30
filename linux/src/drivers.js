@@ -9,10 +9,16 @@
 
 import { CheckmkClient } from './checkmkClient.js';
 import { KumaClient } from './kumaClient.js';
+import { IcingaClient } from './icingaClient.js';
+import { NagiosClient } from './nagiosClient.js';
+import { NagiosXiClient } from './nagiosXiClient.js';
 
 const FACTORIES = {
     'checkmk-rest': () => new CheckmkClient(),
     'prometheus-kuma': () => new KumaClient(),
+    'icinga2-rest': () => new IcingaClient(),
+    'nagios-statusjson': () => new NagiosClient(),
+    'nagiosxi-rest': () => new NagiosXiClient(),
 };
 
 /** Legt je Treiber einen Client an. */

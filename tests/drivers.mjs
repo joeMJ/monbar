@@ -12,6 +12,9 @@ import * as tt from '../linux/src/targetTypes.js';
 import * as u from '../linux/src/monUtil.js';
 import { CheckmkClient } from '../linux/src/checkmkClient.js';
 import { KumaClient } from '../linux/src/kumaClient.js';
+import { IcingaClient } from '../linux/src/icingaClient.js';
+import { NagiosClient } from '../linux/src/nagiosClient.js';
+import { NagiosXiClient } from '../linux/src/nagiosXiClient.js';
 import { setRoutes, calls } from './mock/http.js';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -184,6 +187,120 @@ await test('Uptime Kuma: Anmeldeseite statt Metriken wird erkannt', async () => 
     assert.equal(r.error, 'format');
     setRoutes([{ match: has('/metrics'), status: 401 }]);
     assert.equal((await new KumaClient().fetchProblems(kuma, 'k')).error, 'auth');
+});
+
+const auth = h => Buffer.from(h.Authorization.slice(6), 'base64').toString();
+const param = (url, key) => new URL(url).searchParams.get(key);
+
+// ---------------------------------------------------------------------------
+// Icinga 2
+// ---------------------------------------------------------------------------
+
+const ici = { ...u.makeTarget('icinga2'), id: 'tici00001', url: 'https://icinga.lan:5665', username: 'monbar' };
+
+await test('Icinga 2: Basic Auth, gefilterte Abfragen, Host-Wartung per joins', async () => {
+    setRoutes([
+        { match: has('/v1/objects/hosts'), json: { results: [
+            { name: 'nas', attrs: { name: 'nas', state: 1.0, state_type: 1.0, acknowledgement: 0, downtime_depth: 0 } }] } },
+        { match: has('/v1/objects/services'), json: { results: [
+            { name: 'web!http', attrs: { name: 'http', host_name: 'web', state: 2.0, state_type: 1.0 }, joins: { host: {} } }] } },
+    ]);
+    const r = await new IcingaClient().fetchProblems(ici, 'pw', { any: true, hosts: null, services: ['web'], events: false });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.problems.map(p => p.kind), ['host', 'service']);
+    assert.equal(auth(calls[0].headers), 'monbar:pw');
+    assert.equal(param(calls[0].url, 'filter'), 'host.state!=0 && host.state_type==1');
+    assert.equal(param(calls[1].url, 'filter'), 'service.state!=0 && service.state_type==1 && service.host_name=="web"');
+    assert.equal(param(calls[1].url, 'joins'), 'host.downtime_depth');
+});
+
+await test('Icinga 2: Filter abgelehnt → einmal ohne Filter, danach dauerhaft ohne', async () => {
+    setRoutes([
+        { match: url => url.includes('filter='), status: 403 },
+        { match: has('/v1/objects/'), json: { results: [
+            { name: 'a!x', attrs: { name: 'x', host_name: 'a', state: 2, state_type: 1 } },
+            { name: 'b!y', attrs: { name: 'y', host_name: 'b', state: 0, state_type: 1 } }] } },
+    ]);
+    const c = new IcingaClient();
+    const r = await c.fetchProblems(ici, 'pw', { any: true, hosts: false, services: null, events: false });
+    assert.equal(r.ok, true);
+    assert.equal(u.filterProblems(r.problems, [u.makeSubscription(ici.id, '*')], ici.id).length, 1);
+    assert.equal(calls.length, 2);
+    await c.fetchProblems(ici, 'pw', { any: true, hosts: false, services: null, events: false });
+    assert.ok(!calls.at(-1).url.includes('filter='));
+    // Dienstliste für die Einstellungen wird trotzdem auf den Host eingegrenzt
+    assert.deepEqual((await c.listServices(ici, 'pw', 'a')).items, ['x']);
+});
+
+await test('Icinga 2: Test, Hostliste, falsches Passwort', async () => {
+    setRoutes([{ match: has('/v1/objects/hosts'), json: { results: [{ attrs: { name: 'b' } }, { attrs: { name: 'a' } }] } }]);
+    const c = new IcingaClient();
+    assert.match((await c.test(ici, 'pw')).message, /2 Hosts/);
+    assert.deepEqual((await c.listHosts(ici, 'pw')).items, ['a', 'b']);
+    setRoutes([{ match: has('/v1/'), status: 401 }]);
+    assert.equal((await new IcingaClient().fetchProblems(ici, 'x', { any: true, hosts: null, services: null })).error, 'auth');
+});
+
+// ---------------------------------------------------------------------------
+// Nagios Core
+// ---------------------------------------------------------------------------
+
+const nag = { ...u.makeTarget('nagios'), id: 'tnag00001', url: 'https://srv.lan/nagios', username: 'nagiosadmin' };
+const ok = data => ({ result: { type_code: 0, type_text: 'Success' }, data });
+
+await test('Nagios Core: statusjson-Abfragen mit Klartext-Status und Basic Auth', async () => {
+    setRoutes([
+        { match: url => param(url, 'query') === 'hostlist', json: ok({ hostlist: { nas: { status: 'down', state_type: 'hard' } } }) },
+        { match: url => param(url, 'query') === 'servicelist', json: ok({ servicelist: { web: { HTTP: { status: 'critical', state_type: 'hard' } } } }) },
+    ]);
+    const r = await new NagiosClient().fetchProblems(nag, 'pw', { any: true, hosts: null, services: ['web'], events: false });
+    assert.equal(r.ok, true);
+    assert.deepEqual(r.problems.map(p => [p.kind, p.host, p.severity]), [['host', 'nas', 'crit'], ['service', 'web', 'crit']]);
+    assert.equal(auth(calls[0].headers), 'nagiosadmin:pw');
+    assert.ok(calls[0].url.startsWith('https://srv.lan/nagios/cgi-bin/statusjson.cgi?query=hostlist&details=true&hoststatus=down+unreachable'));
+    assert.equal(param(calls[1].url, 'formatoptions'), 'enumerate');
+    assert.equal(param(calls[1].url, 'hostname'), 'web');
+});
+
+await test('Nagios Core: CGI-Fehler, falscher Pfad, Version im Test', async () => {
+    setRoutes([{ match: has('statusjson.cgi'), json: { result: { type_code: 1, message: 'Invalid query' }, data: {} } }]);
+    const r = await new NagiosClient().fetchProblems(nag, 'pw', { any: true, hosts: null, services: null });
+    assert.deepEqual([r.ok, r.error, r.message], [false, 'format', 'Invalid query']);
+    setRoutes([]);
+    assert.match((await new NagiosClient().test(nag, 'pw')).message, /nicht gefunden/);
+    setRoutes([{ match: has('programstatus'), json: ok({ programstatus: { version: '4.5.3' } }) }]);
+    assert.match((await new NagiosClient().test(nag, 'pw')).message, /Nagios Core 4\.5\.3/);
+});
+
+// ---------------------------------------------------------------------------
+// Nagios XI
+// ---------------------------------------------------------------------------
+
+const xi = { ...u.makeTarget('nagiosxi'), id: 'txi000001', url: 'https://xi.lan' };
+
+await test('Nagios XI: API-Key als Parameter, Filter ne:0, Ergebnis doppelt gefiltert', async () => {
+    setRoutes([
+        { match: has('/objects/hoststatus'), json: { recordcount: 0, hoststatus: [] } },
+        // älteres XI ignoriert den Filter und liefert auch OK
+        { match: has('/objects/servicestatus'), json: { recordcount: 2, servicestatus: [
+            { host_name: 'web', name: 'HTTP', current_state: '2', state_type: '1' },
+            { host_name: 'web', name: 'Ping', current_state: '0', state_type: '1' }] } },
+    ]);
+    const r = await new NagiosXiClient().fetchProblems(xi, 'KEY&1', { any: true, hosts: null, services: null });
+    assert.equal(r.ok, true);
+    assert.equal(u.filterProblems(r.problems, [u.makeSubscription(xi.id, '*')], xi.id).length, 1);
+    assert.ok(calls[0].url.startsWith('https://xi.lan/nagiosxi/api/v1/objects/hoststatus?'));
+    assert.equal(param(calls[0].url, 'apikey'), 'KEY&1');
+    assert.equal(param(calls[1].url, 'current_state'), 'ne:0');
+    assert.equal(calls[0].headers.Authorization, undefined);
+});
+
+await test('Nagios XI: falscher Key (HTTP 200 mit error) wird als Anmeldefehler erkannt', async () => {
+    setRoutes([{ match: has('/objects/'), json: { error: 'Invalid API Key' } }]);
+    const r = await new NagiosXiClient().test(xi, 'falsch');
+    assert.deepEqual([r.ok, r.error], [false, 'auth']);
+    setRoutes([{ match: has('/objects/hoststatus'), json: { recordcount: '12', hoststatus: [{ host_name: 'a' }] } }]);
+    assert.match((await new NagiosXiClient().test(xi, 'k')).message, /12 Hosts/);
 });
 
 console.log(`${count} Treiber-Tests bestanden.`);

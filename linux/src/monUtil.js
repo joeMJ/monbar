@@ -4,7 +4,7 @@
  * Filterung, Sortierung und Formatierung.
  */
 
-import { getType, mapState, isText } from './targetTypes.js';
+import { getType, mapState, isText, fieldLabel, DRIVERS } from './targetTypes.js';
 
 export {
     TYPES, typeIds, getType, fieldLabel, hasCapability, getIntervalChoices,
@@ -91,6 +91,7 @@ export function parseTargets(json) {
             name: isText(item.name, 40) ? item.name.trim() : getType(item.type).name,
             url: typeof item.url === 'string' ? item.url.trim().slice(0, 300) : '',
             site: typeof item.site === 'string' ? item.site.trim().slice(0, 40) : '',
+            weburl: typeof item.weburl === 'string' ? item.weburl.trim().slice(0, 300) : '',
             username: typeof item.username === 'string' ? item.username.trim().slice(0, 80) : '',
             insecure: item.insecure === true,
             enabled: item.enabled !== false,
@@ -108,6 +109,7 @@ export function serializeTargets(targets) {
         name: t.name,
         url: t.url,
         site: t.site,
+        weburl: t.weburl ?? '',
         username: t.username,
         insecure: !!t.insecure,
         enabled: t.enabled !== false,
@@ -123,6 +125,7 @@ export function makeTarget(typeId, name = '') {
         name: isText(name?.trim(), 40) ? name.trim() : type.name,
         url: '',
         site: '',
+        weburl: '',
         username: '',
         insecure: false,
         enabled: true,
@@ -152,14 +155,18 @@ export function isValidSite(site) {
  */
 export function targetProblem(target) {
     const type = getType(target.type);
-    if (!type.known || !type.driver)
+    const driver = DRIVERS[type.driver];
+    if (!type.known || !driver)
         return 'Zielart ist nicht mehr in der Zielarten-Datenbank';
     if (!normalizeUrl(target.url))
-        return 'Server-URL fehlt oder ist ungültig (http:// oder https://)';
+        return `${fieldLabel(type, 'url')} fehlt oder ist ungültig (http:// oder https://)`;
     if (type.fields.includes('site') && !isValidSite(target.site))
-        return 'Instanz (Site) fehlt oder ist ungültig';
-    if (type.driver === 'checkmk-rest' && !target.username)
-        return 'Automationsbenutzer fehlt';
+        return `${fieldLabel(type, 'site')} fehlt oder ist ungültig`;
+    // Pflichtfelder bestimmt der Treiber (im Code), nicht die Datenbank
+    if (driver.required.includes('username') && !target.username)
+        return `${fieldLabel(type, 'username')} fehlt`;
+    if (type.fields.includes('weburl') && target.weburl && !normalizeUrl(target.weburl))
+        return `${fieldLabel(type, 'weburl')}: Adresse ist ungültig`;
     return null;
 }
 
@@ -1102,6 +1109,336 @@ export function kumaGuiLink(target) {
     return url ? `${url}/dashboard` : null;
 }
 
+// ---------------------------------------------------------------------------
+// Gemeinsam für Icinga 2 und Nagios
+// ---------------------------------------------------------------------------
+
+/** Hart bestätigter Zustand? Akzeptiert 1/0, "1"/"0", "hard"/"soft"; unbekannt = hart. */
+export function isHardState(value) {
+    if (value === undefined || value === null || value === '')
+        return true;
+    if (typeof value === 'string' && /^(hard|soft)$/i.test(value))
+        return value.toLowerCase() === 'hard';
+    return Number(value) === 1;
+}
+
+/** Rohstatus als Schlüssel für die Status-Übersetzung: 2.0 → "2", "Critical" → "critical". */
+function stateKey(value) {
+    if (typeof value === 'number')
+        return String(Math.round(value));
+    const s = String(value ?? '').trim();
+    return /^[0-9]+(\.0+)?$/.test(s) ? String(Math.round(Number(s))) : s.toLowerCase();
+}
+
+function positive(value) {
+    return value === true || Number(value) > 0;
+}
+
+// ---------------------------------------------------------------------------
+// Icinga 2 (REST API /v1/objects)
+// ---------------------------------------------------------------------------
+
+/** Basisadresse der API; eine angegebene Adresse mit /v1 wird nicht doppelt ergänzt. */
+export function icingaApiBase(target) {
+    const url = (normalizeUrl(target.url) ?? '').replace(/\/v1$/, '');
+    return `${url}/v1`;
+}
+
+/** Zeichenkette für Icinga-Filterausdrücke (doppelte Anführungszeichen, maskiert). */
+function icingaString(s) {
+    return JSON.stringify(String(s));
+}
+
+/**
+ * Filterausdruck: nur Probleme, optional nur harte Zustände und nur bestimmte Hosts.
+ * @param {'host'|'service'} kind
+ */
+export function icingaFilter(kind, hosts, hardOnly) {
+    const parts = [`${kind}.state!=0`];
+    if (hardOnly)
+        parts.push(`${kind}.state_type==1`);
+    const column = kind === 'host' ? 'host.name' : 'service.host_name';
+    if (hosts?.length === 1)
+        parts.push(`${column}==${icingaString(hosts[0])}`);
+    else if (hosts?.length > 1)
+        parts.push(`${column} in [${hosts.map(icingaString).join(',')}]`);
+    return parts.join(' && ');
+}
+
+export const ICINGA_HOST_ATTRS = [
+    'name', 'display_name', 'state', 'state_type', 'acknowledgement', 'downtime_depth',
+    'last_check_result', 'last_state_change',
+];
+export const ICINGA_SERVICE_ATTRS = [
+    'name', 'display_name', 'host_name', 'state', 'state_type', 'acknowledgement', 'downtime_depth',
+    'last_check_result', 'last_state_change',
+];
+
+/** Abfrage-Parameter: attrs=a&attrs=b&joins=host.downtime_depth&filter=… */
+export function icingaQuery(attrs, { filter = null, joins = [] } = {}) {
+    const parts = attrs.map(a => `attrs=${encodeURIComponent(a)}`);
+    for (const j of joins)
+        parts.push(`joins=${encodeURIComponent(j)}`);
+    if (filter)
+        parts.push(`filter=${encodeURIComponent(filter)}`);
+    return parts.join('&');
+}
+
+function icingaResults(json) {
+    return isPlainObject(json) && Array.isArray(json.results)
+        ? json.results.filter(r => isPlainObject(r?.attrs)) : [];
+}
+
+export function icingaHostProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    const out = [];
+    for (const r of icingaResults(json)) {
+        const a = r.attrs;
+        const host = String(a.name ?? r.name ?? '').trim();
+        if (!host || (hardOnly && !isHardState(a.state_type)))
+            continue;
+        const { severity, label } = mapState(type, 'host', stateKey(a.state));
+        out.push(finishProblem({
+            target: target.id,
+            kind: 'host',
+            host,
+            name: '',
+            severity,
+            label,
+            text: trimText(a.last_check_result?.output),
+            since: toMillis(a.last_state_change),
+            acknowledged: positive(a.acknowledgement),
+            downtime: positive(a.downtime_depth),
+        }));
+    }
+    return out;
+}
+
+export function icingaServiceProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    const out = [];
+    for (const r of icingaResults(json)) {
+        const a = r.attrs;
+        // Objektname ist „host!dienst“; host_name und name stehen auch einzeln in attrs
+        const [fullHost, fullName] = String(r.name ?? '').split('!');
+        const host = String(a.host_name ?? fullHost ?? '').trim();
+        const name = String(a.display_name || a.name || fullName || '').trim();
+        if (!host || !name || (hardOnly && !isHardState(a.state_type)))
+            continue;
+        const { severity, label } = mapState(type, 'service', stateKey(a.state));
+        const log = parseLogwatch(a.last_check_result?.output);
+        out.push(finishProblem({
+            target: target.id,
+            kind: 'service',
+            host,
+            name,
+            severity,
+            label,
+            text: trimText(log ? log.message : a.last_check_result?.output),
+            log: !!log,
+            count: log?.count ?? null,
+            since: toMillis(a.last_state_change),
+            acknowledged: positive(a.acknowledgement),
+            downtime: positive(a.downtime_depth) || positive(r.joins?.host?.downtime_depth),
+        }));
+    }
+    return out;
+}
+
+/** Namen aus einer Objekt-Abfrage (für die Auswahl in den Einstellungen). */
+export function icingaNames(json, { service = false } = {}) {
+    const names = icingaResults(json)
+        .map(r => String((service ? r.attrs.display_name || r.attrs.name : r.attrs.name) ?? '').trim())
+        .filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
+/**
+ * Link in Icinga Web (Modul Icinga DB Web). Ohne eingetragene Weboberfläche kein Link,
+ * denn die API-Adresse (Port 5665) ist keine Oberfläche.
+ */
+export function icingaGuiLink(target, problem) {
+    const web = normalizeUrl(target.weburl);
+    if (!web)
+        return null;
+    if (problem.kind === 'host')
+        return `${web}/icingadb/host?name=${encodeURIComponent(problem.host)}`;
+    return `${web}/icingadb/service?name=${encodeURIComponent(problem.name)}&host.name=${encodeURIComponent(problem.host)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Nagios Core (JSON-CGI statusjson.cgi, ab 4.0.7)
+// ---------------------------------------------------------------------------
+
+/** Basisadresse der Weboberfläche, z. B. https://server/nagios (ohne /cgi-bin). */
+export function nagiosBase(target) {
+    return (normalizeUrl(target.url) ?? '').replace(/\/cgi-bin(\/[^/]*)?$/, '');
+}
+
+/**
+ * Adresse einer statusjson-Abfrage. `formatoptions=enumerate` liefert Status als Text
+ * („critical“) statt als Bitwert; die Status-Übersetzung kennt vorsichtshalber beides.
+ */
+export function nagiosQueryUrl(target, query, params = {}) {
+    const parts = [`query=${query}`];
+    for (const [key, value] of Object.entries(params)) {
+        if (value !== undefined && value !== null && value !== '')
+            parts.push(`${key}=${key === 'servicestatus' || key === 'hoststatus' ? value : encodeURIComponent(value)}`);
+    }
+    return `${nagiosBase(target)}/cgi-bin/statusjson.cgi?${parts.join('&')}`;
+}
+
+/** Fehlermeldung der CGI (result.type_code ≠ 0) oder null. */
+export function nagiosResultError(json) {
+    if (!isPlainObject(json) || !isPlainObject(json.data))
+        return 'Antwort ohne Daten – ist die Adresse die Nagios-Weboberfläche?';
+    const code = json.result?.type_code;
+    if (code !== undefined && Number(code) !== 0)
+        return String(json.result?.message || json.result?.type_text || `Fehler ${code}`);
+    return null;
+}
+
+function nagiosDetail(value) {
+    return isPlainObject(value) ? value : { status: value };
+}
+
+function nagiosProblem(target, type, kind, host, name, d, hardOnly) {
+    if (hardOnly && !isHardState(d.state_type))
+        return null;
+    const { severity, label } = mapState(type, kind, stateKey(d.status));
+    const output = d.plugin_output ?? d.output;
+    const log = kind === 'service' ? parseLogwatch(output) : null;
+    return finishProblem({
+        target: target.id,
+        kind,
+        host,
+        name,
+        severity,
+        label,
+        text: trimText(log ? log.message : output),
+        log: !!log,
+        count: log?.count ?? null,
+        since: toMillis(d.last_state_change),
+        acknowledged: positive(d.problem_has_been_acknowledged),
+        downtime: positive(d.scheduled_downtime_depth),
+    });
+}
+
+export function nagiosHostProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    const list = json?.data?.hostlist;
+    if (!isPlainObject(list))
+        return [];
+    return Object.entries(list)
+        .map(([host, v]) => nagiosProblem(target, type, 'host', host, '', nagiosDetail(v), hardOnly))
+        .filter(Boolean);
+}
+
+export function nagiosServiceProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    const list = json?.data?.servicelist;
+    if (!isPlainObject(list))
+        return [];
+    const out = [];
+    for (const [host, services] of Object.entries(list)) {
+        if (!isPlainObject(services))
+            continue;
+        for (const [name, v] of Object.entries(services)) {
+            const p = nagiosProblem(target, type, 'service', host, name, nagiosDetail(v), hardOnly);
+            if (p)
+                out.push(p);
+        }
+    }
+    return out;
+}
+
+/** Hostnamen (hostlist) bzw. Dienste eines Hosts (servicelist). */
+export function nagiosNames(json, host = null) {
+    const data = json?.data ?? {};
+    const names = host
+        ? Object.keys(isPlainObject(data.servicelist?.[host]) ? data.servicelist[host] : {})
+        : Object.keys(isPlainObject(data.hostlist) ? data.hostlist : {});
+    return names.sort((a, b) => a.localeCompare(b));
+}
+
+export function nagiosGuiLink(target, problem) {
+    const base = nagiosBase(target);
+    if (!base)
+        return null;
+    const h = encodeURIComponent(problem.host);
+    if (problem.kind === 'host')
+        return `${base}/cgi-bin/extinfo.cgi?type=1&host=${h}`;
+    return `${base}/cgi-bin/extinfo.cgi?type=2&host=${h}&service=${encodeURIComponent(problem.name)}`;
+}
+
+// ---------------------------------------------------------------------------
+// Nagios XI (REST API /nagiosxi/api/v1/objects)
+// ---------------------------------------------------------------------------
+
+/** Basisadresse der API; eine URL mit oder ohne /nagiosxi wird akzeptiert. */
+export function nagiosXiApiBase(target) {
+    const url = (normalizeUrl(target.url) ?? '').replace(/\/nagiosxi(\/.*)?$/, '');
+    return `${url}/nagiosxi/api/v1`;
+}
+
+/** Datensätze einer Antwort – neue Form {servicestatus: [...]}, alte {servicestatuslist: {servicestatus: ...}}. */
+export function nagiosXiRecords(json, key) {
+    if (!isPlainObject(json))
+        return [];
+    const value = json[key] ?? json[`${key}list`]?.[key];
+    if (Array.isArray(value))
+        return value.filter(isPlainObject);
+    return isPlainObject(value) ? [value] : [];
+}
+
+/** XI liefert Zeiten meist als „2026-09-30 10:00:00“ (Ortszeit des Servers). */
+export function nagiosXiTime(value) {
+    if (typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}(:[0-9]{2})?$/.test(value.trim())) {
+        const ms = Date.parse(value.trim().replace(' ', 'T'));
+        return Number.isFinite(ms) && ms > 0 ? ms : null;
+    }
+    return toMillis(value);
+}
+
+function nagiosXiProblem(target, type, kind, r, hardOnly) {
+    const host = String(r.host_name ?? (kind === 'host' ? r.name : '') ?? '').trim();
+    const name = kind === 'host' ? '' : String(r.name ?? r.service_description ?? r.display_name ?? '').trim();
+    if (!host || (kind === 'service' && !name) || (hardOnly && !isHardState(r.state_type)))
+        return null;
+    const { severity, label } = mapState(type, kind, stateKey(r.current_state));
+    const log = kind === 'service' ? parseLogwatch(r.output) : null;
+    return finishProblem({
+        target: target.id,
+        kind,
+        host,
+        name,
+        severity,
+        label,
+        text: trimText(log ? log.message : r.output),
+        log: !!log,
+        count: log?.count ?? null,
+        since: nagiosXiTime(r.last_state_change),
+        acknowledged: positive(r.problem_has_been_acknowledged),
+        downtime: positive(r.scheduled_downtime_depth),
+    });
+}
+
+export function nagiosXiHostProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    return nagiosXiRecords(json, 'hoststatus').map(r => nagiosXiProblem(target, type, 'host', r, hardOnly)).filter(Boolean);
+}
+
+export function nagiosXiServiceProblems(json, target, { hardOnly = true } = {}, type = getType(target.type)) {
+    return nagiosXiRecords(json, 'servicestatus').map(r => nagiosXiProblem(target, type, 'service', r, hardOnly)).filter(Boolean);
+}
+
+export function nagiosXiNames(json, key) {
+    const names = nagiosXiRecords(json, key)
+        .map(r => String(key === 'hoststatus' ? r.host_name ?? r.name ?? '' : r.name ?? r.service_description ?? '').trim())
+        .filter(Boolean);
+    return [...new Set(names)].sort((a, b) => a.localeCompare(b));
+}
+
+export function nagiosXiGuiLink(target) {
+    const url = normalizeUrl(target.url);
+    return url ? `${url.replace(/\/nagiosxi(\/.*)?$/, '')}/nagiosxi/` : null;
+}
+
 /** Link zur Oberfläche des Monitoring-Systems für eine Meldung. */
 export function guiLink(target, problem) {
     const type = getType(target.type);
@@ -1109,5 +1446,11 @@ export function guiLink(target, problem) {
         return checkmkGuiLink(target, problem);
     if (type.driver === 'prometheus-kuma')
         return kumaGuiLink(target);
+    if (type.driver === 'icinga2-rest')
+        return icingaGuiLink(target, problem);
+    if (type.driver === 'nagios-statusjson')
+        return nagiosGuiLink(target, problem);
+    if (type.driver === 'nagiosxi-rest')
+        return nagiosXiGuiLink(target, problem);
     return null;
 }

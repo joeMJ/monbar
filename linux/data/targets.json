@@ -1,8 +1,16 @@
 {
   "schema": 1,
-  "version": 1,
+  "version": 2,
   "updated": "2026-09-30",
-  "intervals": [1, 2, 5, 10, 15, 30, 60],
+  "intervals": [
+    1,
+    2,
+    5,
+    10,
+    15,
+    30,
+    60
+  ],
   "types": [
     {
       "id": "checkmk",
@@ -10,7 +18,12 @@
       "driver": "checkmk-rest",
       "description": "Abfrage über die REST API (ab Checkmk 2.2). Hosts, Services und – falls genutzt – Meldungen der Event Console. Am besten einen eigenen Automationsbenutzer mit reinen Leserechten anlegen.",
       "docsUrl": "https://docs.checkmk.com/latest/de/rest_api.html",
-      "fields": ["url", "site", "username", "secret"],
+      "fields": [
+        "url",
+        "site",
+        "username",
+        "secret"
+      ],
       "labels": {
         "url": "Server-URL",
         "site": "Instanz (Site)",
@@ -23,33 +36,84 @@
         "username": "Setup → Benutzer → Automationsbenutzer, z. B. monbar",
         "secret": "Automation-Secret des Benutzers – wird im GNOME-Schlüsselbund gespeichert"
       },
-      "capabilities": ["services", "events"],
+      "capabilities": [
+        "services",
+        "events"
+      ],
       "minInterval": 1,
       "defaultInterval": 2,
       "options": {
-        "apiVersions": ["v1", "1.0"]
+        "apiVersions": [
+          "v1",
+          "1.0"
+        ]
       },
       "stateMap": {
         "host": {
-          "0": { "severity": "ok", "label": "UP" },
-          "1": { "severity": "crit", "label": "DOWN" },
-          "2": { "severity": "crit", "label": "UNREACH" }
+          "0": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "1": {
+            "severity": "crit",
+            "label": "DOWN"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "UNREACH"
+          }
         },
         "service": {
-          "0": { "severity": "ok", "label": "OK" },
-          "1": { "severity": "warn", "label": "WARN" },
-          "2": { "severity": "crit", "label": "CRIT" },
-          "3": { "severity": "unknown", "label": "UNKNOWN" }
+          "0": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "1": {
+            "severity": "warn",
+            "label": "WARN"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "CRIT"
+          },
+          "3": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          }
         },
         "event": {
-          "0": { "severity": "ok", "label": "OK" },
-          "1": { "severity": "warn", "label": "WARN" },
-          "2": { "severity": "crit", "label": "CRIT" },
-          "3": { "severity": "unknown", "label": "UNKNOWN" },
-          "ok": { "severity": "ok", "label": "OK" },
-          "warning": { "severity": "warn", "label": "WARN" },
-          "critical": { "severity": "crit", "label": "CRIT" },
-          "unknown": { "severity": "unknown", "label": "UNKNOWN" }
+          "0": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "1": {
+            "severity": "warn",
+            "label": "WARN"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "CRIT"
+          },
+          "3": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          },
+          "ok": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "warning": {
+            "severity": "warn",
+            "label": "WARN"
+          },
+          "critical": {
+            "severity": "crit",
+            "label": "CRIT"
+          },
+          "unknown": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          }
         }
       }
     },
@@ -59,7 +123,11 @@
       "driver": "prometheus-kuma",
       "description": "Abfrage über den Prometheus-Endpunkt /metrics. Monitore werden nach Hostname bzw. Host der URL zu Servern gruppiert. API-Key unter Einstellungen → API-Keys anlegen.",
       "docsUrl": "https://github.com/louislam/uptime-kuma/wiki/Prometheus-Integration",
-      "fields": ["url", "username", "secret"],
+      "fields": [
+        "url",
+        "username",
+        "secret"
+      ],
       "labels": {
         "url": "Server-URL",
         "username": "Benutzer (nur ohne API-Key)",
@@ -70,19 +138,258 @@
         "username": "Leer lassen, wenn du einen API-Key verwendest. Nur nötig, wenn noch nie ein API-Key angelegt wurde.",
         "secret": "API-Key (uk…) – wird im GNOME-Schlüsselbund gespeichert"
       },
-      "capabilities": ["services"],
+      "capabilities": [
+        "services"
+      ],
       "minInterval": 1,
       "defaultInterval": 1,
       "options": {
         "certWarnDays": 14,
-        "skipMonitorTypes": ["group"]
+        "skipMonitorTypes": [
+          "group"
+        ]
       },
       "stateMap": {
         "service": {
-          "0": { "severity": "crit", "label": "DOWN" },
-          "1": { "severity": "ok", "label": "UP" },
-          "2": { "severity": "warn", "label": "PENDING" },
-          "3": { "severity": "maintenance", "label": "WARTUNG" }
+          "0": {
+            "severity": "crit",
+            "label": "DOWN"
+          },
+          "1": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "2": {
+            "severity": "warn",
+            "label": "PENDING"
+          },
+          "3": {
+            "severity": "maintenance",
+            "label": "WARTUNG"
+          }
+        }
+      }
+    },
+    {
+      "id": "icinga2",
+      "name": "Icinga 2",
+      "driver": "icinga2-rest",
+      "description": "Experimentell – nach der Icinga-Dokumentation gebaut, noch an keinem echten System getestet. Abfrage über die REST API (Port 5665) mit einem eigenen ApiUser, der nur lesen darf.",
+      "docsUrl": "https://icinga.com/docs/icinga-2/latest/doc/12-icinga2-api/",
+      "fields": [
+        "url",
+        "weburl",
+        "username",
+        "secret"
+      ],
+      "labels": {
+        "url": "API-URL",
+        "weburl": "Icinga Web (optional)",
+        "username": "API-Benutzer",
+        "secret": "Passwort"
+      },
+      "hints": {
+        "url": "Adresse der Icinga-2-API mit Port, z. B. https://icinga.example.lan:5665 – das Zertifikat ist meist selbst signiert",
+        "weburl": "Nur für den Klick auf eine Meldung: Adresse von Icinga Web, z. B. https://icinga.example.lan/icingaweb2",
+        "username": "ApiUser mit permissions = [ \"objects/query/Host\", \"objects/query/Service\" ]",
+        "secret": "Passwort des ApiUsers – wird im GNOME-Schlüsselbund gespeichert"
+      },
+      "capabilities": [
+        "services"
+      ],
+      "minInterval": 1,
+      "defaultInterval": 2,
+      "stateMap": {
+        "host": {
+          "0": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "1": {
+            "severity": "crit",
+            "label": "DOWN"
+          }
+        },
+        "service": {
+          "0": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "1": {
+            "severity": "warn",
+            "label": "WARNING"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "CRITICAL"
+          },
+          "3": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          }
+        }
+      }
+    },
+    {
+      "id": "nagios",
+      "name": "Nagios Core",
+      "driver": "nagios-statusjson",
+      "description": "Experimentell – nach Dokumentation und Quellcode gebaut, noch an keinem echten System getestet. Abfrage über die JSON-CGI statusjson.cgi (ab Nagios Core 4.0.7) mit den Zugangsdaten der Weboberfläche.",
+      "docsUrl": "https://labs.nagios.com/2014/06/19/exploring-the-new-json-cgis-in-nagios-core-4-0-7-part-1/",
+      "fields": [
+        "url",
+        "username",
+        "secret"
+      ],
+      "labels": {
+        "url": "Nagios-URL",
+        "username": "Benutzer",
+        "secret": "Passwort"
+      },
+      "hints": {
+        "url": "Adresse der Nagios-Weboberfläche ohne /cgi-bin, z. B. https://server.example.lan/nagios",
+        "username": "Benutzer der Weboberfläche (htpasswd), der alle Hosts und Dienste sehen darf",
+        "secret": "Passwort dieses Benutzers – wird im GNOME-Schlüsselbund gespeichert"
+      },
+      "capabilities": [
+        "services"
+      ],
+      "minInterval": 1,
+      "defaultInterval": 2,
+      "stateMap": {
+        "host": {
+          "up": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "pending": {
+            "severity": "ok",
+            "label": "PENDING"
+          },
+          "down": {
+            "severity": "crit",
+            "label": "DOWN"
+          },
+          "unreachable": {
+            "severity": "crit",
+            "label": "UNREACHABLE"
+          },
+          "1": {
+            "severity": "ok",
+            "label": "PENDING"
+          },
+          "2": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "4": {
+            "severity": "crit",
+            "label": "DOWN"
+          },
+          "8": {
+            "severity": "crit",
+            "label": "UNREACHABLE"
+          }
+        },
+        "service": {
+          "ok": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "pending": {
+            "severity": "ok",
+            "label": "PENDING"
+          },
+          "warning": {
+            "severity": "warn",
+            "label": "WARNING"
+          },
+          "critical": {
+            "severity": "crit",
+            "label": "CRITICAL"
+          },
+          "unknown": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          },
+          "1": {
+            "severity": "ok",
+            "label": "PENDING"
+          },
+          "2": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "4": {
+            "severity": "warn",
+            "label": "WARNING"
+          },
+          "8": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          },
+          "16": {
+            "severity": "crit",
+            "label": "CRITICAL"
+          }
+        }
+      }
+    },
+    {
+      "id": "nagiosxi",
+      "name": "Nagios XI",
+      "driver": "nagiosxi-rest",
+      "description": "Experimentell – nach der XI-Dokumentation gebaut, noch an keinem echten System getestet. Abfrage über die REST API (nur lesender Bereich „Objects“) mit dem API-Key eines Benutzers.",
+      "docsUrl": "https://assets.nagios.com/downloads/nagiosxi/docs/Accessing-and-Using-the-XI-REST-API.pdf",
+      "fields": [
+        "url",
+        "secret"
+      ],
+      "labels": {
+        "url": "Nagios-XI-URL",
+        "secret": "API-Key"
+      },
+      "hints": {
+        "url": "Adresse des XI-Servers, z. B. https://xi.example.lan (mit oder ohne /nagiosxi)",
+        "secret": "API-Key aus XI (Help → API Docs oder Benutzerprofil) – wird im GNOME-Schlüsselbund gespeichert"
+      },
+      "capabilities": [
+        "services"
+      ],
+      "minInterval": 1,
+      "defaultInterval": 2,
+      "stateMap": {
+        "host": {
+          "0": {
+            "severity": "ok",
+            "label": "UP"
+          },
+          "1": {
+            "severity": "crit",
+            "label": "DOWN"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "UNREACHABLE"
+          }
+        },
+        "service": {
+          "0": {
+            "severity": "ok",
+            "label": "OK"
+          },
+          "1": {
+            "severity": "warn",
+            "label": "WARNING"
+          },
+          "2": {
+            "severity": "crit",
+            "label": "CRITICAL"
+          },
+          "3": {
+            "severity": "unknown",
+            "label": "UNKNOWN"
+          }
         }
       }
     }

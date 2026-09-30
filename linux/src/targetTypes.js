@@ -19,7 +19,7 @@
 export const SCHEMA_VERSION = 1;
 
 /** Felder, die ein Ziel haben kann (Eingabezeilen in den Einstellungen). */
-export const FIELDS = ['url', 'site', 'username', 'secret'];
+export const FIELDS = ['url', 'site', 'weburl', 'username', 'secret'];
 
 /** Normierte Schweregrade, auf die alle Status-Werte abgebildet werden. */
 export const SEVERITIES = ['ok', 'warn', 'crit', 'unknown', 'maintenance'];
@@ -44,6 +44,27 @@ export const DRIVERS = {
         capabilities: ['services'],
         kinds: ['service'],
     },
+    // Icinga 2 REST API (/v1/objects), ApiUser mit Basic Auth
+    'icinga2-rest': {
+        fields: ['url', 'weburl', 'username', 'secret'],
+        required: ['url', 'username', 'secret'],
+        capabilities: ['services'],
+        kinds: ['host', 'service'],
+    },
+    // Nagios Core ab 4.0.7: JSON-CGI statusjson.cgi, Zugangsdaten der Weboberfläche
+    'nagios-statusjson': {
+        fields: ['url', 'username', 'secret'],
+        required: ['url', 'username', 'secret'],
+        capabilities: ['services'],
+        kinds: ['host', 'service'],
+    },
+    // Nagios XI REST API (/nagiosxi/api/v1/objects), API-Key
+    'nagiosxi-rest': {
+        fields: ['url', 'secret'],
+        required: ['url', 'secret'],
+        capabilities: ['services'],
+        kinds: ['host', 'service'],
+    },
 };
 
 const ID_PATTERN = /^[a-z0-9-]{2,20}$/;
@@ -56,6 +77,7 @@ const DEFAULT_INTERVAL_CHOICES = [1, 2, 5, 10, 15, 30, 60];
 const FIELD_LABELS = {
     url: 'Server-URL',
     site: 'Instanz',
+    weburl: 'Weboberfläche (optional)',
     username: 'Benutzer',
     secret: 'Secret',
 };

@@ -42,7 +42,13 @@ test('mitgelieferte Datenbank ist vollständig gültig (nichts übersprungen)', 
 
 test('mitgelieferte Datenbank: Checkmk und Uptime Kuma mit Treiber und Status-Übersetzung', () => {
     tt.applyTargetTypes(tt.validateTargetDb(bundledRaw).db);
-    assert.deepEqual(tt.typeIds(), ['checkmk', 'uptimekuma']);
+    assert.deepEqual(tt.typeIds(), ['checkmk', 'uptimekuma', 'icinga2', 'nagios', 'nagiosxi']);
+    // Alle Hinweistexte sind angekommen (zu lange würden stillschweigend verworfen)
+    for (const raw of bundledRaw.types)
+        assert.deepEqual(Object.keys(tt.getType(raw.id).hints).sort(), Object.keys(raw.hints ?? {}).sort(), raw.id);
+    // Neue Zielarten sind als experimentell gekennzeichnet
+    for (const id of ['icinga2', 'nagios', 'nagiosxi'])
+        assert.match(tt.getType(id).description, /^Experimentell/, id);
     const cmk = tt.getType('checkmk');
     assert.equal(cmk.driver, 'checkmk-rest');
     assert.deepEqual(cmk.fields, ['url', 'site', 'username', 'secret']);
@@ -461,6 +467,147 @@ test('Uptime Kuma: Monitore, Server-Zuordnung und Meldungen', () => {
     // Wartung wird standardmäßig ausgeblendet
     assert.equal(u.filterProblems(ps, [sub('*')], T).length, 3);
     assert.equal(u.guiLink(kuma, got.Nextcloud), 'http://kuma:3001/dashboard');
+});
+
+// ---------------------------------------------------------------------------
+// Icinga 2
+// ---------------------------------------------------------------------------
+
+const ici = { ...u.makeTarget('icinga2'), id: T, url: 'https://icinga.lan:5665/', username: 'monbar',
+    weburl: 'https://icinga.lan/icingaweb2' };
+
+test('Icinga 2: Pflichtfelder aus dem Treiber, Weboberfläche optional', () => {
+    assert.equal(u.targetProblem(ici), null);
+    assert.match(u.targetProblem({ ...ici, username: '' }), /API-Benutzer fehlt/);
+    assert.match(u.targetProblem({ ...ici, weburl: 'kaputt' }), /Icinga Web/);
+    assert.equal(u.targetProblem({ ...ici, weburl: '' }), null);
+    assert.equal(u.icingaApiBase(ici), 'https://icinga.lan:5665/v1');
+    assert.equal(u.icingaApiBase({ ...ici, url: 'https://icinga.lan:5665/v1' }), 'https://icinga.lan:5665/v1');
+});
+
+test('Icinga 2: Filterausdrücke mit sicher maskierten Hostnamen', () => {
+    assert.equal(u.icingaFilter('service', null, false), 'service.state!=0');
+    assert.equal(u.icingaFilter('host', ['web'], true), 'host.state!=0 && host.state_type==1 && host.name=="web"');
+    assert.equal(u.icingaFilter('service', ['a', 'b"x'], false), 'service.state!=0 && service.host_name in ["a","b\\"x"]');
+    const q = u.icingaQuery(['name', 'state'], { filter: 'service.state!=0', joins: ['host.downtime_depth'] });
+    assert.equal(q, 'attrs=name&attrs=state&joins=host.downtime_depth&filter=service.state!%3D0');
+});
+
+test('Icinga 2: Hosts und Dienste werden normiert (Status als Kommazahl, Host-Wartung über joins)', () => {
+    const hosts = u.icingaHostProblems({ results: [
+        { name: 'nas', type: 'Host', attrs: { name: 'nas', state: 1.0, state_type: 1.0, acknowledgement: 0.0,
+            downtime_depth: 0.0, last_check_result: { output: 'PING CRITICAL - Packet loss = 100%' },
+            last_state_change: 1727690000.123 } },
+        { name: 'weich', type: 'Host', attrs: { name: 'weich', state: 1.0, state_type: 0.0 } },
+    ] }, ici);
+    assert.equal(hosts.length, 1);
+    assert.equal(hosts[0].severity, 'crit');
+    assert.equal(hosts[0].label, 'DOWN');
+    assert.equal(hosts[0].since, 1727690000123);
+    const svc = u.icingaServiceProblems({ results: [
+        { name: 'web!http', type: 'Service', attrs: { name: 'http', display_name: 'HTTP', host_name: 'web',
+            state: 2.0, state_type: 1.0, acknowledgement: 1.0, downtime_depth: 0.0,
+            last_check_result: { output: 'HTTP CRITICAL: 503' } }, joins: { host: { downtime_depth: 0.0 } } },
+        { name: 'db!disk', type: 'Service', attrs: { name: 'disk', host_name: 'db', state: 1.0, state_type: 1.0,
+            acknowledgement: 0.0, downtime_depth: 0.0 }, joins: { host: { downtime_depth: 1.0 } } },
+    ] }, ici);
+    assert.deepEqual(svc.map(p => [p.host, p.name, p.severity]), [['web', 'HTTP', 'crit'], ['db', 'disk', 'warn']]);
+    assert.equal(svc[0].acknowledged, true);
+    assert.equal(svc[1].downtime, true);
+    assert.equal(u.icingaServiceProblems({ value: [] }, ici).length, 0);
+});
+
+test('Icinga 2: Links nur mit eingetragener Weboberfläche', () => {
+    assert.equal(u.guiLink(ici, { kind: 'service', host: 'web', name: 'HTTP Check' }),
+        'https://icinga.lan/icingaweb2/icingadb/service?name=HTTP%20Check&host.name=web');
+    assert.equal(u.guiLink({ ...ici, weburl: '' }, { kind: 'host', host: 'web', name: '' }), null);
+});
+
+// ---------------------------------------------------------------------------
+// Nagios Core
+// ---------------------------------------------------------------------------
+
+const nag = { ...u.makeTarget('nagios'), id: T, url: 'https://srv.lan/nagios/', username: 'nagiosadmin' };
+
+test('Nagios Core: Adressen der JSON-CGI', () => {
+    assert.equal(u.nagiosBase({ ...nag, url: 'https://srv.lan/nagios/cgi-bin/statusjson.cgi' }), 'https://srv.lan/nagios');
+    assert.equal(u.nagiosQueryUrl(nag, 'servicelist', {
+        details: 'true', servicestatus: 'warning+critical+unknown', formatoptions: 'enumerate', hostname: 'web 1',
+    }), 'https://srv.lan/nagios/cgi-bin/statusjson.cgi?query=servicelist&details=true&servicestatus=warning+critical+unknown&formatoptions=enumerate&hostname=web%201');
+    assert.ok(!u.nagiosQueryUrl(nag, 'hostlist', { hostname: null }).includes('hostname'));
+});
+
+const NAGIOS_SERVICES = {
+    format_version: 0,
+    result: { query_time: 1727690000000, cgi: 'statusjson.cgi', query: 'servicelist', type_code: 0, type_text: 'Success', message: '' },
+    data: { servicelist: {
+        web: {
+            HTTP: { host_name: 'web', description: 'HTTP', status: 'critical', state_type: 'hard',
+                plugin_output: 'HTTP CRITICAL - 503', last_state_change: 1727680000000,
+                problem_has_been_acknowledged: false, scheduled_downtime_depth: 0 },
+            Load: { status: 'warning', state_type: 'soft', plugin_output: 'WARNING load' },
+        },
+        db: { Disk: { status: 4, state_type: 1, plugin_output: 'DISK WARNING', problem_has_been_acknowledged: true } },
+    } },
+};
+
+test('Nagios Core: Dienste mit Klartext- und Bitwert-Status, weiche Zustände raus', () => {
+    assert.equal(u.nagiosResultError(NAGIOS_SERVICES), null);
+    const ps = u.nagiosServiceProblems(NAGIOS_SERVICES, nag);
+    assert.deepEqual(ps.map(p => [p.host, p.name, p.severity, p.label]),
+        [['web', 'HTTP', 'crit', 'CRITICAL'], ['db', 'Disk', 'warn', 'WARNING']]);
+    assert.equal(ps[0].since, 1727680000000);
+    assert.equal(ps[1].acknowledged, true);
+    assert.equal(u.nagiosServiceProblems(NAGIOS_SERVICES, nag, { hardOnly: false }).length, 3);
+    assert.deepEqual(u.nagiosNames(NAGIOS_SERVICES, 'web'), ['HTTP', 'Load']);
+});
+
+test('Nagios Core: Hosts, Fehler der CGI und Links', () => {
+    const hosts = u.nagiosHostProblems({ result: { type_code: 0 }, data: { hostlist: {
+        router: { status: 'unreachable', state_type: 'hard', plugin_output: 'unreachable' },
+        nas: { status: 8, state_type: 1 },
+        ok: { status: 'up' },
+    } } }, nag);
+    assert.deepEqual(hosts.filter(h => h.severity !== 'ok').map(h => [h.host, h.label]),
+        [['router', 'UNREACHABLE'], ['nas', 'UNREACHABLE']]);
+    assert.equal(u.filterProblems(hosts, [sub('*')], T).length, 2);
+    assert.match(u.nagiosResultError({ result: { type_code: 3, message: 'Unauthorized' }, data: {} }), /Unauthorized/);
+    assert.match(u.nagiosResultError('<html>'), /Weboberfläche/);
+    assert.equal(u.guiLink(nag, { kind: 'service', host: 'web', name: 'HTTP' }),
+        'https://srv.lan/nagios/cgi-bin/extinfo.cgi?type=2&host=web&service=HTTP');
+    assert.deepEqual(u.nagiosNames({ data: { hostlist: { b: 2, a: 2 } } }), ['a', 'b']);
+});
+
+// ---------------------------------------------------------------------------
+// Nagios XI
+// ---------------------------------------------------------------------------
+
+const xi = { ...u.makeTarget('nagiosxi'), id: T, url: 'https://xi.lan/nagiosxi/' };
+
+test('Nagios XI: Adresse mit oder ohne /nagiosxi, API-Key genügt', () => {
+    assert.equal(u.targetProblem(xi), null);
+    assert.equal(u.nagiosXiApiBase(xi), 'https://xi.lan/nagiosxi/api/v1');
+    assert.equal(u.nagiosXiApiBase({ ...xi, url: 'https://xi.lan' }), 'https://xi.lan/nagiosxi/api/v1');
+});
+
+test('Nagios XI: neue und alte Antwortform, Zeitformat, Zeichenketten als Zahlen', () => {
+    const neu = { recordcount: 2, servicestatus: [
+        { host_name: 'web', name: 'HTTP', current_state: '2', state_type: '1', output: 'HTTP CRITICAL',
+            problem_has_been_acknowledged: '0', scheduled_downtime_depth: '0', last_state_change: '2026-09-30 10:00:00' },
+        { host_name: 'web', name: 'Ping', current_state: '0', state_type: '1', output: 'OK' },
+    ] };
+    const ps = u.nagiosXiServiceProblems(neu, xi);
+    assert.equal(ps.length, 2);   // OK bleibt erhalten, filterProblems wirft es raus
+    assert.equal(u.filterProblems(ps, [sub('*')], T).length, 1);
+    assert.equal(ps[0].since, new Date(2026, 8, 30, 10, 0, 0).getTime());
+    const alt = { servicestatuslist: { recordcount: '1', servicestatus: {
+        host_name: 'db', name: 'Disk', current_state: '1', state_type: '1', problem_has_been_acknowledged: '1' } } };
+    const [a] = u.nagiosXiServiceProblems(alt, xi);
+    assert.deepEqual([a.host, a.severity, a.acknowledged], ['db', 'warn', true]);
+    const hosts = u.nagiosXiHostProblems({ hoststatus: [{ host_name: 'nas', current_state: '1', state_type: '1', output: 'down' }] }, xi);
+    assert.equal(hosts[0].label, 'DOWN');
+    assert.deepEqual(u.nagiosXiNames(neu, 'servicestatus'), ['HTTP', 'Ping']);
+    assert.equal(u.guiLink(xi, hosts[0]), 'https://xi.lan/nagiosxi/');
 });
 
 // ---------------------------------------------------------------------------
