@@ -14,6 +14,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import { formatSince, formatClock, summarize } from './monUtil.js';
 
 const MAX_CARDS = 60;
+// Längere Texte kürzen: Umbrechende Labels ohne Längengrenze sprengen sonst die Karten
+const MAX_DETAIL_CHARS = 170;
 
 const SEVERITY_ICONS = {
     crit: 'dialog-error-symbolic',
@@ -239,20 +241,21 @@ class MonIndicator extends PanelMenu.Button {
             can_focus: true,
             x_expand: true,
             x_align: Clutter.ActorAlign.FILL,
+            y_align: Clutter.ActorAlign.START,
         });
         card.connect('clicked', () => this._openLink(p.link));
         outer.add_child(card);
 
         const row = new St.BoxLayout({
             x_expand: true,
-            y_align: Clutter.ActorAlign.CENTER,
+            y_align: Clutter.ActorAlign.START,
             style_class: 'monbar-card-row',
         });
         card.set_child(row);
 
         row.add_child(new St.Icon({
             icon_name: SEVERITY_ICONS[p.severity] ?? SEVERITY_ICONS.warn,
-            icon_size: 24,
+            icon_size: 22,
             style_class: 'monbar-card-icon',
             y_align: Clutter.ActorAlign.START,
         }));
@@ -260,6 +263,7 @@ class MonIndicator extends PanelMenu.Button {
         const info = new St.BoxLayout({
             vertical: true,
             x_expand: true,
+            y_align: Clutter.ActorAlign.START,
             style_class: 'monbar-card-info',
         });
         row.add_child(info);
@@ -269,7 +273,8 @@ class MonIndicator extends PanelMenu.Button {
         title.clutter_text.ellipsize = Pango.EllipsizeMode.END;
         info.add_child(title);
 
-        const where = p.kind === 'host' ? 'Server' : p.kind === 'event' ? `${p.host} • Log` : p.host;
+        const isLog = p.kind === 'event' || p.log;
+        const where = p.kind === 'host' ? 'Server' : isLog ? `${p.host} • Log` : p.host;
         const subtitle = new St.Label({
             text: `${where} • ${p.targetName}`,
             style_class: 'monbar-card-subtitle',
@@ -278,11 +283,13 @@ class MonIndicator extends PanelMenu.Button {
         info.add_child(subtitle);
 
         const statusParts = [p.label];
+        if (isLog && p.count > 0)
+            statusParts.push(`${p.count} ${p.count === 1 ? 'Meldung' : 'Meldungen'}`);
+        else if (p.count > 1)
+            statusParts.push(`${p.count}×`);
         const since = formatSince(p.since);
         if (since)
             statusParts.push(since);
-        if (p.count > 1)
-            statusParts.push(`${p.count}×`);
         if (p.acknowledged)
             statusParts.push('quittiert');
         if (p.downtime)
@@ -295,10 +302,12 @@ class MonIndicator extends PanelMenu.Button {
         info.add_child(status);
 
         if (p.text) {
+            // Gekürzt: Die ganze Meldung steht im Monitoring (Klick auf die Karte)
+            const text = p.text.length > MAX_DETAIL_CHARS
+                ? `${p.text.slice(0, MAX_DETAIL_CHARS - 1).trimEnd()}…` : p.text;
             const detail = new St.Label({
-                text: p.text,
-                style_class: 'monbar-card-detail',
-                x_expand: true,
+                text,
+                style_class: `monbar-card-detail${isLog ? ' monbar-card-log' : ''}`,
             });
             detail.clutter_text.line_wrap = true;
             detail.clutter_text.line_wrap_mode = Pango.WrapMode.WORD_CHAR;
@@ -306,12 +315,14 @@ class MonIndicator extends PanelMenu.Button {
             info.add_child(detail);
         }
 
-        // Rechts: ignorieren (nicht für Server-Status – dafür das Abo ändern)
+        // Rechts: ignorieren (nicht für Server-Status – dafür das Abo ändern).
+        // Bei Log-Meldungen wird nur diese Meldung ignoriert, nicht das ganze Log.
         if (p.kind !== 'host') {
             const ignoreBtn = new St.Button({
                 style_class: 'monbar-icon-button monbar-ignore-button button',
                 can_focus: true,
-                y_align: Clutter.ActorAlign.CENTER,
+                y_align: Clutter.ActorAlign.START,
+                accessible_name: isLog ? 'Diese Log-Meldung ignorieren' : 'Diesen Dienst ignorieren',
                 child: new St.Icon({ icon_name: 'view-conceal-symbolic', icon_size: 16 }),
             });
             ignoreBtn.connect('clicked', () => this._extension.ignoreProblem(p));

@@ -105,6 +105,8 @@ export default class MonBarPreferences extends ExtensionPreferences {
 
         // ==========================================
         // Seite 1: Ziele
+        //   Übersicht → Unterseite je Ziel (Allgemein, Verbindung, Zugangsdaten, Abos)
+        //             → Unterseite je Server (Dienste, Log-Meldungen, Ignorieren)
         // ==========================================
         const pageTargets = new Adw.PreferencesPage({
             title: 'Ziele',
@@ -112,391 +114,52 @@ export default class MonBarPreferences extends ExtensionPreferences {
         });
         window.add(pageTargets);
 
-        const groupAdd = new Adw.PreferencesGroup({
-            title: 'Ziel hinzufügen',
-            description: 'Ein Ziel ist eine Instanz eines Monitoring-Systems, z. B. dein Checkmk-Server. Welche Arten es gibt, steht in der Zielarten-Datenbank (Seite „Updates“).',
-        });
-        pageTargets.add(groupAdd);
-
-        const typeRow = new Adw.ComboRow({ title: 'Zielart' });
-        const fillTypeRow = () => {
-            const previous = typeIds()[typeRow.selected];
-            typeRow.model = new Gtk.StringList({ strings: typeIds().map(id => getType(id).name) });
-            const idx = typeIds().indexOf(previous);
-            typeRow.selected = idx >= 0 ? idx : 0;
+        /** Neu aufbaubarer Bereich einer Seite: ersetzt beim nächsten Aufbau seine Gruppen. */
+        const makeSection = page => {
+            let groups = [];
+            return {
+                clear() {
+                    for (const g of groups)
+                        page.remove(g);
+                    groups = [];
+                },
+                add(group) {
+                    page.add(group);
+                    groups.push(group);
+                    return group;
+                },
+            };
         };
-        fillTypeRow();
-        groupAdd.add(typeRow);
 
-        const nameRow = new Adw.EntryRow({ title: 'Bezeichnung (optional, z. B. „Checkmk Zuhause“)' });
-        groupAdd.add(nameRow);
+        /** Unterseite mit Kopfzeile (Titel, Untertitel) und Zurück-Pfeil. */
+        const makeSubpage = (title, subtitle = '') => {
+            const page = new Adw.PreferencesPage();
+            const windowTitle = new Adw.WindowTitle({ title, subtitle });
+            const header = new Adw.HeaderBar({ title_widget: windowTitle });
+            const toolbar = new Adw.ToolbarView({ content: page });
+            toolbar.add_top_bar(header);
+            const nav = new Adw.NavigationPage({ title, child: toolbar });
+            return { nav, page, windowTitle };
+        };
 
-        const addTargetRow = new Adw.ActionRow({
-            title: 'Ziel anlegen',
-            subtitle: 'Danach Adresse und Zugangsdaten eintragen. „Alle Server“ wird automatisch abonniert.',
-        });
-        const addTargetBtn = new Gtk.Button({
-            label: 'Hinzufügen',
-            valign: Gtk.Align.CENTER,
-            css_classes: ['suggested-action'],
-        });
-        addTargetRow.add_suffix(addTargetBtn);
-        addTargetRow.activatable_widget = addTargetBtn;
-        groupAdd.add(addTargetRow);
-
-        const groupTargets = new Adw.PreferencesGroup({ title: 'Eingetragene Ziele' });
-        pageTargets.add(groupTargets);
-
-        const expandedTargets = new Set();
-        // Speichern-Funktionen der sichtbaren Eingabefelder (vor einem Neuaufbau und beim Schließen)
+        // Speichern-Funktionen der sichtbaren Eingabefelder (beim Verlassen einer Seite und beim Schließen)
         const pendingSavers = new Set();
-        let targetRows = [];
-
         const flushPending = async () => {
             for (const save of [...pendingSavers])
                 await save();
         };
+        // Aufbau-Funktionen der gerade geöffneten Unterseiten (für Änderungen von außen)
+        const openRenderers = new Set();
 
-        const rebuildTargets = () => {
-            for (const save of pendingSavers)
-                save();
-            pendingSavers.clear();
-            for (const row of targetRows)
-                groupTargets.remove(row);
-            targetRows = [];
-
-            const targets = loadTargets();
-            groupTargets.description = targets.length === 0
-                ? 'Noch keine Ziele eingetragen.'
-                : `${targets.length} Ziel${targets.length === 1 ? '' : 'e'}`;
-
-            for (const target of targets) {
-                const row = buildTargetRow(target);
-                groupTargets.add(row);
-                targetRows.push(row);
-            }
-        };
-
-        const targetSubtitle = target => {
-            const type = getType(target.type);
-            const parts = [type.name];
-            if (!target.enabled)
-                parts.push('deaktiviert');
-            const problem = targetProblem(target);
-            parts.push(problem ?? normalizeUrl(target.url));
-            return parts.join(' • ');
-        };
-
-        const buildTargetRow = target => {
-            const type = getType(target.type);
-            const expander = new Adw.ExpanderRow({
-                title: esc(target.name),
-                subtitle: esc(targetSubtitle(target)),
-                show_enable_switch: false,
-                expanded: expandedTargets.has(target.id),
-            });
-            expander.connect('notify::expanded', () => {
-                if (expander.expanded)
-                    expandedTargets.add(target.id);
-                else
-                    expandedTargets.delete(target.id);
-            });
-            const refreshSubtitle = () => {
-                const t = getTarget(target.id);
-                if (t)
-                    expander.subtitle = esc(targetSubtitle(t));
-            };
-
-            if (!type.known) {
-                expander.add_row(new Adw.ActionRow({
-                    title: 'Zielart unbekannt',
-                    subtitle: `„${esc(target.type)}“ steht nicht (mehr) in der Zielarten-Datenbank – dieses Ziel wird nicht abgefragt.`,
-                }));
-            } else if (type.description) {
-                expander.add_row(new Adw.ActionRow({ title: esc(type.name), subtitle: esc(type.description) }));
-            }
-
-            // Aktiv
-            const activeRow = new Adw.SwitchRow({ title: 'Aktiv', subtitle: 'Deaktivierte Ziele werden nicht abgefragt' });
-            activeRow.active = target.enabled;
-            activeRow.connect('notify::active', () => {
-                updateTarget(target.id, { enabled: activeRow.active });
-                refreshSubtitle();
-            });
-            expander.add_row(activeRow);
-
-            // Name
-            const nameEntry = new Adw.EntryRow({ title: 'Bezeichnung', text: target.name, show_apply_button: true });
-            nameEntry.connect('apply', () => {
-                const name = nameEntry.text.trim();
-                if (!name || name.length > 40) {
-                    nameEntry.add_css_class('error');
-                    return;
-                }
-                nameEntry.remove_css_class('error');
-                updateTarget(target.id, { name });
-                expander.title = esc(name);
-                rebuildSubs();
-            });
-            expander.add_row(nameEntry);
-
-            // Felder der Zielart (ohne Secret)
-            const httpWarning = new Adw.ActionRow({
-                title: 'Unverschlüsselte Verbindung',
-                subtitle: 'Mit http:// wird das Secret im Klartext übertragen. Wenn möglich https:// verwenden.',
-                visible: /^http:\/\//i.test(target.url),
-            });
-            httpWarning.add_prefix(new Gtk.Image({
-                icon_name: 'dialog-warning-symbolic',
-                valign: Gtk.Align.CENTER,
-                css_classes: ['warning'],
-            }));
-            for (const field of type.fields.filter(f => f !== 'secret')) {
-                const entry = new Adw.EntryRow({
-                    title: esc(fieldLabel(type, field)),
-                    text: target[field] ?? '',
-                    show_apply_button: true,
-                    tooltip_text: type.hints?.[field] ?? '',
-                });
-                if (field === 'url')
-                    entry.input_purpose = Gtk.InputPurpose.URL;
-                const save = () => {
-                    const value = entry.text.trim();
-                    const current = getTarget(target.id);
-                    if (!current || value === (current[field] ?? ''))
-                        return;
-                    let clean = value;
-                    if (field === 'url' && value) {
-                        clean = normalizeUrl(value);
-                        if (!clean) {
-                            entry.add_css_class('error');
-                            return;
-                        }
-                    }
-                    if (field === 'site' && value && !isValidSite(value)) {
-                        entry.add_css_class('error');
-                        return;
-                    }
-                    entry.remove_css_class('error');
-                    updateTarget(target.id, { [field]: clean });
-                    if (field === 'url') {
-                        entry.text = clean;
-                        httpWarning.visible = /^http:\/\//i.test(clean);
-                    }
-                    refreshSubtitle();
-                };
-                entry.connect('apply', save);
-                entry.connect('entry-activated', save);
-                pendingSavers.add(save);
-                expander.add_row(entry);
-                if (type.hints?.[field] && field === 'url')
-                    expander.add_row(new Adw.ActionRow({ subtitle: esc(type.hints[field]), css_classes: ['dim-label'] }));
-            }
-            expander.add_row(httpWarning);
-
-            // Secret im Schlüsselbund
-            const secretRow = new Adw.PasswordEntryRow({
-                title: esc(fieldLabel(type, 'secret')),
-                show_apply_button: true,
-            });
-            expander.add_row(secretRow);
-            const secretInfo = new Adw.ActionRow({
-                title: 'Speicherort',
-                subtitle: 'GNOME-Schlüsselbund – wird geladen …',
-            });
-            expander.add_row(secretInfo);
-
-            let storedSecret = null;
-            lookupSecret(secretName(target.id))
-                .then(value => {
-                    storedSecret = value ?? '';
-                    secretRow.text = storedSecret;
-                    secretInfo.subtitle = storedSecret
-                        ? 'Im GNOME-Schlüsselbund hinterlegt (verschlüsselt)'
-                        : 'Noch kein Secret hinterlegt';
-                })
-                .catch(e => {
-                    secretInfo.subtitle = `Schlüsselbund nicht erreichbar: ${esc(e.message)}`;
-                });
-            const saveSecret = async () => {
-                const value = secretRow.text.trim();
-                if (storedSecret === null || value === storedSecret)
-                    return;
-                try {
-                    const name = getTarget(target.id)?.name ?? target.name;
-                    if (value)
-                        await storeSecret(secretName(target.id), value, secretLabel(name));
-                    else
-                        await clearSecret(secretName(target.id));
-                    storedSecret = value;
-                    secretInfo.subtitle = value
-                        ? 'Im GNOME-Schlüsselbund gespeichert (verschlüsselt)'
-                        : 'Secret aus dem Schlüsselbund entfernt';
-                    bumpSecretRevision();
-                } catch (e) {
-                    secretInfo.subtitle = `Speichern fehlgeschlagen: ${esc(e.message)}`;
-                }
-            };
-            secretRow.connect('apply', saveSecret);
-            secretRow.connect('entry-activated', saveSecret);
-            pendingSavers.add(saveSecret);
-
-            // Zertifikat
-            const insecureRow = new Adw.SwitchRow({
-                title: 'Zertifikat nicht prüfen',
-                subtitle: 'Nur für selbst signierte Zertifikate im eigenen Netz. Die Verbindung bleibt verschlüsselt, aber der Server wird nicht mehr sicher erkannt.',
-            });
-            insecureRow.active = target.insecure;
-            insecureRow.connect('notify::active', () => updateTarget(target.id, { insecure: insecureRow.active }));
-            expander.add_row(insecureRow);
-
-            // Intervall
-            const choices = new Set(getIntervalChoices().filter(m => m >= (type.minInterval ?? 1)));
-            if (target.interval)
-                choices.add(target.interval);
-            const options = [...choices].sort((a, b) => a - b);
-            const intervalRow = new Adw.ComboRow({
-                title: 'Abfrageintervall',
-                model: new Gtk.StringList({
-                    strings: [`Standard (${minutesLabel(effectiveInterval({ ...target, interval: null }, type))})`,
-                        ...options.map(minutesLabel)],
-                }),
-            });
-            intervalRow.selected = target.interval ? options.indexOf(target.interval) + 1 : 0;
-            intervalRow.connect('notify::selected', () => {
-                updateTarget(target.id, { interval: intervalRow.selected === 0 ? null : options[intervalRow.selected - 1] });
-            });
-            expander.add_row(intervalRow);
-
-            // Verbindung testen
-            const testRow = new Adw.ActionRow({
-                title: 'Verbindung testen',
-                subtitle: 'Prüft Adresse und Zugangsdaten',
-            });
-            const testIcon = new Gtk.Image({ icon_name: 'network-server-symbolic', valign: Gtk.Align.CENTER });
-            testRow.add_prefix(testIcon);
-            const testBtn = new Gtk.Button({ label: 'Testen', valign: Gtk.Align.CENTER });
-            testBtn.connect('clicked', async () => {
-                testBtn.sensitive = false;
-                testRow.subtitle = 'Verbinde …';
-                await flushPending();
-                const res = await callDriver(target.id, 'test');
-                for (const c of ['success', 'error'])
-                    testIcon.remove_css_class(c);
-                if (res.ok) {
-                    testIcon.icon_name = 'emblem-ok-symbolic';
-                    testIcon.add_css_class('success');
-                    testRow.subtitle = esc(res.message);
-                } else {
-                    testIcon.icon_name = 'dialog-warning-symbolic';
-                    testIcon.add_css_class('error');
-                    testRow.subtitle = esc(describeResult(res));
-                }
-                testBtn.sensitive = true;
-            });
-            testRow.add_suffix(testBtn);
-            expander.add_row(testRow);
-
-            if (type.docsUrl) {
-                const docsRow = new Adw.ActionRow({
-                    title: 'Dokumentation',
-                    subtitle: esc(type.docsUrl.replace('https://', '')),
-                });
-                const docsBtn = new Gtk.Button({ label: 'Öffnen', valign: Gtk.Align.CENTER });
-                docsBtn.connect('clicked', () => {
-                    try {
-                        Gio.AppInfo.launch_default_for_uri(type.docsUrl, null);
-                    } catch (e) {
-                        docsRow.subtitle = `Link konnte nicht geöffnet werden: ${esc(e.message)}`;
-                    }
-                });
-                docsRow.add_suffix(docsBtn);
-                expander.add_row(docsRow);
-            }
-
-            // Entfernen (zweiter Klick bestätigt)
-            const deleteRow = new Adw.ActionRow({
-                title: 'Ziel entfernen',
-                subtitle: 'Löscht das Ziel, seine Abos und das Secret im Schlüsselbund',
-            });
-            const deleteBtn = new Gtk.Button({
-                label: 'Entfernen',
-                valign: Gtk.Align.CENTER,
-                css_classes: ['destructive-action'],
-            });
-            let armed = false;
-            deleteBtn.connect('clicked', async () => {
-                if (!armed) {
-                    armed = true;
-                    deleteBtn.label = 'Wirklich entfernen?';
-                    GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
-                        armed = false;
-                        if (deleteBtn.get_root())
-                            deleteBtn.label = 'Entfernen';
-                        return GLib.SOURCE_REMOVE;
-                    });
-                    return;
-                }
-                pendingSavers.delete(saveSecret);
-                try {
-                    await clearSecret(secretName(target.id));
-                } catch (e) {
-                    console.warn(`[monbar] Secret konnte nicht gelöscht werden: ${e.message}`);
-                }
-                saveSubs(loadSubs().filter(s => s.target !== target.id));
-                saveTargets(loadTargets().filter(t => t.id !== target.id));
-                expandedTargets.delete(target.id);
-                rebuildTargets();
-                rebuildSubs();
-            });
-            deleteRow.add_suffix(deleteBtn);
-            expander.add_row(deleteRow);
-
-            return expander;
-        };
-
-        const addTarget = () => {
-            const typeId = typeIds()[typeRow.selected];
-            if (!typeId)
-                return;
-            const target = makeTarget(typeId, nameRow.text);
-            saveTargets([...loadTargets(), target]);
-            saveSubs([...loadSubs(), makeSubscription(target.id, ALL_HOSTS)]);
-            expandedTargets.add(target.id);
-            nameRow.text = '';
-            addTargetRow.subtitle = `Angelegt: ${esc(target.name)} – jetzt Adresse und Zugangsdaten eintragen`;
-            rebuildTargets();
-            rebuildSubs();
-        };
-        addTargetBtn.connect('clicked', addTarget);
-        nameRow.connect('entry-activated', addTarget);
-
-        // ==========================================
-        // Seite 2: Abos
-        // ==========================================
-        const pageSubs = new Adw.PreferencesPage({
-            title: 'Abos',
-            icon_name: 'view-list-symbolic',
-        });
-        window.add(pageSubs);
-
-        const groupSubsInfo = new Adw.PreferencesGroup({
-            title: 'Abos',
-            description: 'Je Ziel legst du fest, welche Server angezeigt werden – alle oder einzelne – und je Server, welche Dienste und ob Log-Meldungen. Ignorier-Muster: * = beliebige Zeichen, ? = genau ein Zeichen. Sie gelten für Dienstnamen und Log-Texte; die Liste unter „Alle Server“ gilt für das ganze Ziel.',
-        });
-        pageSubs.add(groupSubsInfo);
-
-        let subGroups = [];
-        const expandedSubs = new Set();
-        const hostCache = new Map();       // Ziel-ID → Liste der Server
-        const serviceCache = new Map();    // Abo-ID → Liste der Dienste
-        const openHostLists = new Set();   // Ziele, deren Serverliste aufgeklappt ist
+        const hostCache = new Map();       // Ziel-ID → Liste der Server vom Monitoring
+        const serviceCache = new Map();    // Abo-ID → Liste der Dienste vom Monitoring
 
         const subSummary = (sub, type) => {
             const parts = [];
-            parts.push(sub.services === 'all' ? 'alle Dienste'
+            const what = type.driver === 'prometheus-kuma' ? 'Monitore' : 'Dienste';
+            parts.push(sub.services === 'all' ? `alle ${what}`
                 : sub.services === 'none' ? 'nur Serverstatus'
-                    : `${sub.selected.length} Dienst${sub.selected.length === 1 ? '' : 'e'} ausgewählt`);
+                    : `${sub.selected.length} ${what} ausgewählt`);
             if (hasCapability(type, 'events'))
                 parts.push(sub.events ? 'mit Log-Meldungen' : 'ohne Log-Meldungen');
             if (sub.ignore.length > 0)
@@ -504,314 +167,697 @@ export default class MonBarPreferences extends ExtensionPreferences {
             return parts.join(' • ');
         };
 
-        const rebuildSubs = () => {
-            for (const g of subGroups)
-                pageSubs.remove(g);
-            subGroups = [];
+        const statusImage = target => {
+            const problem = targetProblem(target);
+            const image = new Gtk.Image({
+                icon_name: problem ? 'dialog-warning-symbolic'
+                    : !target.enabled ? 'media-playback-pause-symbolic' : 'network-server-symbolic',
+                valign: Gtk.Align.CENTER,
+            });
+            if (problem)
+                image.add_css_class('warning');
+            else if (!target.enabled)
+                image.add_css_class('dim-label');
+            return image;
+        };
 
+        const overviewSubtitle = (target, subs) => {
+            const type = getType(target.type);
+            const own = subs.filter(s => s.target === target.id);
+            const parts = [type.name];
+            const problem = targetProblem(target);
+            if (problem)
+                parts.push(problem);
+            else
+                parts.push(normalizeUrl(target.url));
+            if (!target.enabled)
+                parts.push('deaktiviert');
+            else if (!problem)
+                parts.push(own.length === 0 ? 'nichts abonniert' : `${own.length} Abo${own.length === 1 ? '' : 's'}`);
+            return parts.join(' • ');
+        };
+
+        // --- Übersicht ---
+        const overview = makeSection(pageTargets);
+        let typeRow = null;
+
+        const renderOverview = () => {
+            overview.clear();
             const targets = loadTargets();
             const subs = loadSubs();
-            if (targets.length === 0) {
-                const g = new Adw.PreferencesGroup({ description: 'Zuerst auf der Seite „Ziele“ ein Ziel anlegen.' });
-                pageSubs.add(g);
-                subGroups.push(g);
-                return;
-            }
 
+            const list = overview.add(new Adw.PreferencesGroup({
+                title: 'Ziele',
+                description: targets.length === 0
+                    ? 'Noch keine Ziele eingetragen – unten eins anlegen.'
+                    : 'Ein Ziel ist eine Instanz eines Monitoring-Systems. Ein Klick öffnet Verbindung, Zugangsdaten und Abos.',
+            }));
             for (const target of targets) {
-                const type = getType(target.type);
-                const own = subs.filter(s => s.target === target.id)
-                    .sort((a, b) => (a.host === ALL_HOSTS ? -1 : b.host === ALL_HOSTS ? 1 : a.host.localeCompare(b.host)));
-                const group = new Adw.PreferencesGroup({
+                const row = new Adw.ActionRow({
                     title: esc(target.name),
-                    description: esc(`${type.name}${own.length === 0 ? ' • nichts abonniert – es wird nichts angezeigt' : ''}`),
+                    subtitle: esc(overviewSubtitle(target, subs)),
+                    activatable: true,
                 });
-                pageSubs.add(group);
-                subGroups.push(group);
-
-                for (const sub of own)
-                    group.add(buildSubRow(target, type, sub));
-
-                addHostPicker(group, target, own);
+                row.add_prefix(statusImage(target));
+                row.add_suffix(new Gtk.Image({ icon_name: 'go-next-symbolic', valign: Gtk.Align.CENTER }));
+                row.connect('activated', () => openTarget(target.id));
+                list.add(row);
             }
-        };
 
-        /** Server hinzufügen: Liste vom Monitoring laden oder Namen eintippen. */
-        const addHostPicker = (group, target, own) => {
-            const subscribed = new Set(own.map(s => s.host));
-            const addHost = host => {
-                const h = host.trim();
-                if (!h || h.length > 200 || subscribed.has(h))
-                    return false;
-                const sub = makeSubscription(target.id, h);
-                saveSubs([...loadSubs(), sub]);
-                expandedSubs.add(sub.id);
-                rebuildSubs();
-                return true;
-            };
-
-            const picker = new Adw.ExpanderRow({
-                title: 'Server abonnieren',
-                subtitle: hostCache.has(target.id)
-                    ? `${hostCache.get(target.id).length} Server geladen`
-                    : 'Liste vom Monitoring laden oder Namen eingeben',
-                expanded: openHostLists.has(target.id),
+            const groupAdd = overview.add(new Adw.PreferencesGroup({
+                title: 'Ziel hinzufügen',
+                description: 'Welche Arten es gibt, steht in der Zielarten-Datenbank (Seite „Updates“). Neue Ziele abonnieren zunächst „Alle Server“.',
+            }));
+            const previous = typeRow ? typeIds()[typeRow.selected] : null;
+            typeRow = new Adw.ComboRow({
+                title: 'Zielart',
+                model: new Gtk.StringList({ strings: typeIds().map(id => getType(id).name) }),
             });
-            picker.connect('notify::expanded', () => {
-                if (picker.expanded)
-                    openHostLists.add(target.id);
-                else
-                    openHostLists.delete(target.id);
-            });
+            typeRow.selected = Math.max(0, typeIds().indexOf(previous));
+            groupAdd.add(typeRow);
 
-            const manual = new Adw.EntryRow({
-                title: subscribed.has(ALL_HOSTS) ? 'Servername' : 'Servername (oder * für alle Server)',
-                show_apply_button: true,
-            });
-            const addManual = () => {
-                if (!addHost(manual.text))
-                    manual.add_css_class('error');
-            };
-            manual.connect('apply', addManual);
-            manual.connect('entry-activated', addManual);
-            picker.add_row(manual);
+            const nameRow = new Adw.EntryRow({ title: 'Bezeichnung (optional, z. B. „Checkmk Zuhause“)' });
+            groupAdd.add(nameRow);
 
-            const loadRow = new Adw.ActionRow({ title: 'Server vom Monitoring laden' });
-            const loadBtn = new Gtk.Button({
-                icon_name: 'view-refresh-symbolic',
+            const addRow = new Adw.ActionRow({ title: 'Ziel anlegen und einrichten' });
+            const addBtn = new Gtk.Button({
+                label: 'Hinzufügen',
                 valign: Gtk.Align.CENTER,
-                tooltip_text: 'Serverliste laden',
+                css_classes: ['suggested-action'],
             });
-            loadBtn.connect('clicked', async () => {
-                loadBtn.sensitive = false;
-                loadRow.subtitle = 'Lade …';
-                await flushPending();
-                const res = await callDriver(target.id, 'listHosts');
-                loadBtn.sensitive = true;
-                if (!res.ok) {
-                    loadRow.subtitle = esc(describeResult(res));
+            const addTarget = () => {
+                const typeId = typeIds()[typeRow.selected];
+                if (!typeId)
                     return;
-                }
-                hostCache.set(target.id, res.items);
-                openHostLists.add(target.id);
-                rebuildSubs();
-            });
-            loadRow.add_suffix(loadBtn);
-            picker.add_row(loadRow);
-
-            const hosts = hostCache.get(target.id) ?? [];
-            const free = hosts.filter(h => !subscribed.has(h));
-            if (hosts.length > 0 && free.length === 0)
-                loadRow.subtitle = 'Alle Server sind bereits abonniert';
-            for (const host of free) {
-                const row = new Adw.ActionRow({ title: esc(host) });
-                const btn = new Gtk.Button({
-                    icon_name: 'list-add-symbolic',
-                    valign: Gtk.Align.CENTER,
-                    tooltip_text: 'Abonnieren',
-                    css_classes: ['flat'],
-                });
-                btn.connect('clicked', () => addHost(host));
-                row.add_suffix(btn);
-                row.activatable_widget = btn;
-                picker.add_row(row);
-            }
-
-            group.add(picker);
+                const target = makeTarget(typeId, nameRow.text);
+                saveTargets([...loadTargets(), target]);
+                saveSubs([...loadSubs(), makeSubscription(target.id, ALL_HOSTS)]);
+                renderOverview();
+                openTarget(target.id);
+            };
+            addBtn.connect('clicked', addTarget);
+            nameRow.connect('entry-activated', addTarget);
+            addRow.add_suffix(addBtn);
+            addRow.activatable_widget = addBtn;
+            groupAdd.add(addRow);
         };
 
-        const buildSubRow = (target, type, sub) => {
-            const isAll = sub.host === ALL_HOSTS;
-            const expander = new Adw.ExpanderRow({
-                title: esc(isAll ? 'Alle Server' : sub.host),
-                subtitle: esc(subSummary(sub, type)),
-                expanded: expandedSubs.has(sub.id),
-            });
-            expander.connect('notify::expanded', () => {
-                if (expander.expanded)
-                    expandedSubs.add(sub.id);
-                else
-                    expandedSubs.delete(sub.id);
-            });
-            const refreshSummary = () => {
-                const s = loadSubs().find(x => x.id === sub.id);
-                if (s)
-                    expander.subtitle = esc(subSummary(s, type));
+        // --- Unterseite: ein Ziel ---
+        const openTarget = targetId => {
+            const initial = getTarget(targetId);
+            if (!initial)
+                return;
+            const type = getType(initial.type);
+            const sp = makeSubpage(initial.name, type.name);
+            const section = makeSection(sp.page);
+            const savers = new Set();
+
+            const runSavers = () => {
+                for (const save of savers) {
+                    save();
+                    pendingSavers.delete(save);
+                }
+                savers.clear();
+            };
+            const addSaver = save => {
+                savers.add(save);
+                pendingSavers.add(save);
             };
 
-            // Dienste
-            const modes = isAll ? ['all', 'none'] : ['all', 'selected', 'none'];
-            const modeLabels = { all: 'Alle', selected: 'Nur ausgewählte', none: 'Keine (nur Serverstatus)' };
-            const modeRow = new Adw.ComboRow({
-                title: type.driver === 'prometheus-kuma' ? 'Monitore' : 'Dienste',
-                subtitle: isAll ? 'Einzelne Dienste wählst du je Server aus' : '',
-                model: new Gtk.StringList({ strings: modes.map(m => modeLabels[m]) }),
-            });
-            modeRow.selected = Math.max(0, modes.indexOf(sub.services));
-            expander.add_row(modeRow);
+            const render = () => {
+                runSavers();
+                section.clear();
+                const target = getTarget(targetId);
+                if (!target)
+                    return;
 
-            // Dienst-Auswahl (nur bei einzelnen Servern)
-            const serviceRows = [];
-            const showServiceRows = () => {
-                for (const r of serviceRows)
-                    r.visible = modes[modeRow.selected] === 'selected';
-            };
-            if (!isAll) {
-                const current = loadSubs().find(x => x.id === sub.id) ?? sub;
-                const loaded = serviceCache.get(sub.id) ?? [];
-                const names = [...new Set([...current.selected, ...loaded])].sort((a, b) => a.localeCompare(b));
+                // ---------- Allgemein ----------
+                const gGeneral = section.add(new Adw.PreferencesGroup({ title: 'Allgemein' }));
+                if (!type.known) {
+                    gGeneral.add(new Adw.ActionRow({
+                        title: 'Zielart unbekannt',
+                        subtitle: `„${esc(target.type)}“ steht nicht (mehr) in der Zielarten-Datenbank – dieses Ziel wird nicht abgefragt.`,
+                    }));
+                }
 
+                const nameEntry = new Adw.EntryRow({ title: 'Bezeichnung', text: target.name, show_apply_button: true });
+                const saveName = () => {
+                    const name = nameEntry.text.trim();
+                    if (!name || name.length > 40) {
+                        nameEntry.add_css_class('error');
+                        return;
+                    }
+                    nameEntry.remove_css_class('error');
+                    if (name === getTarget(targetId)?.name)
+                        return;
+                    updateTarget(targetId, { name });
+                    sp.windowTitle.title = name;
+                    sp.nav.title = name;
+                };
+                nameEntry.connect('apply', saveName);
+                nameEntry.connect('entry-activated', saveName);
+                addSaver(saveName);
+                gGeneral.add(nameEntry);
+
+                const activeRow = new Adw.SwitchRow({ title: 'Aktiv', subtitle: 'Deaktivierte Ziele werden nicht abgefragt' });
+                activeRow.active = target.enabled;
+                activeRow.connect('notify::active', () => updateTarget(targetId, { enabled: activeRow.active }));
+                gGeneral.add(activeRow);
+
+                const choices = new Set(getIntervalChoices().filter(m => m >= (type.minInterval ?? 1)));
+                if (target.interval)
+                    choices.add(target.interval);
+                const options = [...choices].sort((a, b) => a - b);
+                const intervalRow = new Adw.ComboRow({
+                    title: 'Abfrageintervall',
+                    model: new Gtk.StringList({
+                        strings: [`Standard (${minutesLabel(effectiveInterval({ ...target, interval: null }, type))})`,
+                            ...options.map(minutesLabel)],
+                    }),
+                });
+                intervalRow.selected = target.interval ? options.indexOf(target.interval) + 1 : 0;
+                intervalRow.connect('notify::selected', () => {
+                    updateTarget(targetId, { interval: intervalRow.selected === 0 ? null : options[intervalRow.selected - 1] });
+                });
+                gGeneral.add(intervalRow);
+
+                // ---------- Verbindung ----------
+                const connFields = type.fields.filter(f => f === 'url' || f === 'site');
+                const hintLines = connFields.filter(f => type.hints?.[f]).map(f => `${fieldLabel(type, f)}: ${type.hints[f]}`);
+                const gConn = section.add(new Adw.PreferencesGroup({
+                    title: 'Verbindung',
+                    description: esc([type.description, ...hintLines].filter(Boolean).join('\n')),
+                }));
+
+                const httpWarning = new Adw.ActionRow({
+                    title: 'Unverschlüsselte Verbindung',
+                    subtitle: 'Mit http:// werden die Zugangsdaten im Klartext übertragen. Wenn möglich https:// verwenden.',
+                    visible: /^http:\/\//i.test(target.url),
+                });
+                httpWarning.add_prefix(new Gtk.Image({
+                    icon_name: 'dialog-warning-symbolic',
+                    valign: Gtk.Align.CENTER,
+                    css_classes: ['warning'],
+                }));
+
+                const fieldEntry = (group, field) => {
+                    const entry = new Adw.EntryRow({
+                        title: esc(fieldLabel(type, field)),
+                        text: target[field] ?? '',
+                        show_apply_button: true,
+                        tooltip_text: type.hints?.[field] ?? '',
+                    });
+                    if (field === 'url')
+                        entry.input_purpose = Gtk.InputPurpose.URL;
+                    const save = () => {
+                        const value = entry.text.trim();
+                        const current = getTarget(targetId);
+                        if (!current || value === (current[field] ?? ''))
+                            return;
+                        let clean = value;
+                        if (field === 'url' && value) {
+                            clean = normalizeUrl(value);
+                            if (!clean) {
+                                entry.add_css_class('error');
+                                return;
+                            }
+                        }
+                        if (field === 'site' && value && !isValidSite(value)) {
+                            entry.add_css_class('error');
+                            return;
+                        }
+                        entry.remove_css_class('error');
+                        updateTarget(targetId, { [field]: clean });
+                        if (field === 'url') {
+                            if (entry.text !== clean)
+                                entry.text = clean;
+                            httpWarning.visible = /^http:\/\//i.test(clean);
+                        }
+                    };
+                    entry.connect('apply', save);
+                    entry.connect('entry-activated', save);
+                    addSaver(save);
+                    group.add(entry);
+                };
+
+                for (const field of connFields)
+                    fieldEntry(gConn, field);
+                gConn.add(httpWarning);
+
+                const insecureRow = new Adw.SwitchRow({
+                    title: 'Zertifikat nicht prüfen',
+                    subtitle: 'Nur für selbst signierte Zertifikate im eigenen Netz. Die Verbindung bleibt verschlüsselt, aber der Server wird nicht mehr sicher erkannt.',
+                });
+                insecureRow.active = target.insecure;
+                insecureRow.connect('notify::active', () => updateTarget(targetId, { insecure: insecureRow.active }));
+                gConn.add(insecureRow);
+
+                if (type.docsUrl) {
+                    const docsRow = new Adw.ActionRow({
+                        title: 'Dokumentation',
+                        subtitle: esc(type.docsUrl.replace('https://', '')),
+                    });
+                    const docsBtn = new Gtk.Button({ label: 'Öffnen', valign: Gtk.Align.CENTER });
+                    docsBtn.connect('clicked', () => {
+                        try {
+                            Gio.AppInfo.launch_default_for_uri(type.docsUrl, null);
+                        } catch (e) {
+                            docsRow.subtitle = `Link konnte nicht geöffnet werden: ${esc(e.message)}`;
+                        }
+                    });
+                    docsRow.add_suffix(docsBtn);
+                    gConn.add(docsRow);
+                }
+
+                // ---------- Zugangsdaten ----------
+                const credHints = ['username', 'secret'].filter(f => type.fields.includes(f) && type.hints?.[f])
+                    .map(f => `${fieldLabel(type, f)}: ${type.hints[f]}`);
+                const gCred = section.add(new Adw.PreferencesGroup({
+                    title: 'Zugangsdaten',
+                    description: esc(credHints.join('\n')),
+                }));
+                if (type.fields.includes('username'))
+                    fieldEntry(gCred, 'username');
+
+                const secretRow = new Adw.PasswordEntryRow({
+                    title: esc(fieldLabel(type, 'secret')),
+                    show_apply_button: true,
+                });
+                gCred.add(secretRow);
+                const secretInfo = new Adw.ActionRow({
+                    title: 'Speicherort',
+                    subtitle: 'GNOME-Schlüsselbund – wird geladen …',
+                });
+                gCred.add(secretInfo);
+
+                let storedSecret = null;
+                lookupSecret(secretName(targetId))
+                    .then(value => {
+                        storedSecret = value ?? '';
+                        secretRow.text = storedSecret;
+                        secretInfo.subtitle = storedSecret
+                            ? 'Im GNOME-Schlüsselbund hinterlegt (verschlüsselt)'
+                            : 'Noch kein Secret hinterlegt';
+                    })
+                    .catch(e => {
+                        secretInfo.subtitle = `Schlüsselbund nicht erreichbar: ${esc(e.message)}`;
+                    });
+                const saveSecret = async () => {
+                    const value = secretRow.text.trim();
+                    if (storedSecret === null || value === storedSecret)
+                        return;
+                    try {
+                        const name = getTarget(targetId)?.name ?? initial.name;
+                        if (value)
+                            await storeSecret(secretName(targetId), value, secretLabel(name));
+                        else
+                            await clearSecret(secretName(targetId));
+                        storedSecret = value;
+                        secretInfo.subtitle = value
+                            ? 'Im GNOME-Schlüsselbund gespeichert (verschlüsselt)'
+                            : 'Secret aus dem Schlüsselbund entfernt';
+                        bumpSecretRevision();
+                    } catch (e) {
+                        secretInfo.subtitle = `Speichern fehlgeschlagen: ${esc(e.message)}`;
+                    }
+                };
+                secretRow.connect('apply', saveSecret);
+                secretRow.connect('entry-activated', saveSecret);
+                addSaver(saveSecret);
+
+                const testRow = new Adw.ActionRow({
+                    title: 'Verbindung testen',
+                    subtitle: 'Prüft Adresse und Zugangsdaten',
+                });
+                const testIcon = new Gtk.Image({ icon_name: 'network-server-symbolic', valign: Gtk.Align.CENTER });
+                testRow.add_prefix(testIcon);
+                const testBtn = new Gtk.Button({ label: 'Testen', valign: Gtk.Align.CENTER });
+                testBtn.connect('clicked', async () => {
+                    testBtn.sensitive = false;
+                    testRow.subtitle = 'Verbinde …';
+                    await flushPending();
+                    const res = await callDriver(targetId, 'test');
+                    for (const c of ['success', 'error'])
+                        testIcon.remove_css_class(c);
+                    if (res.ok) {
+                        testIcon.icon_name = 'emblem-ok-symbolic';
+                        testIcon.add_css_class('success');
+                        testRow.subtitle = esc(res.message);
+                    } else {
+                        testIcon.icon_name = 'dialog-warning-symbolic';
+                        testIcon.add_css_class('error');
+                        testRow.subtitle = esc(describeResult(res));
+                    }
+                    testBtn.sensitive = true;
+                });
+                testRow.add_suffix(testBtn);
+                testRow.activatable_widget = testBtn;
+                gCred.add(testRow);
+
+                // ---------- Abos ----------
+                const subs = loadSubs().filter(s => s.target === targetId)
+                    .sort((a, b) => (a.host === ALL_HOSTS ? -1 : b.host === ALL_HOSTS ? 1 : a.host.localeCompare(b.host)));
+                const gSubs = section.add(new Adw.PreferencesGroup({
+                    title: 'Abos',
+                    description: subs.length === 0
+                        ? 'Nichts abonniert – von diesem Ziel wird nichts angezeigt. Unten „Alle Server“ oder einzelne Server hinzufügen.'
+                        : 'Welche Server angezeigt werden. Ein Klick öffnet Dienste, Log-Meldungen und Ignorierliste des Servers. Ein einzeln abonnierter Server hat Vorrang vor „Alle Server“.',
+                }));
+                for (const sub of subs) {
+                    const row = new Adw.ActionRow({
+                        title: esc(sub.host === ALL_HOSTS ? 'Alle Server' : sub.host),
+                        subtitle: esc(subSummary(sub, type)),
+                        activatable: true,
+                    });
+                    row.add_prefix(new Gtk.Image({
+                        icon_name: sub.host === ALL_HOSTS ? 'view-grid-symbolic' : 'computer-symbolic',
+                        valign: Gtk.Align.CENTER,
+                    }));
+                    row.add_suffix(new Gtk.Image({ icon_name: 'go-next-symbolic', valign: Gtk.Align.CENTER }));
+                    row.connect('activated', () => openSub(targetId, sub.id, render));
+                    gSubs.add(row);
+                }
+
+                // Server hinzufügen
+                const subscribed = new Set(subs.map(s => s.host));
+                const addHost = host => {
+                    const h = host.trim();
+                    if (!h || h.length > 200 || subscribed.has(h))
+                        return false;
+                    const sub = makeSubscription(targetId, h);
+                    saveSubs([...loadSubs(), sub]);
+                    render();
+                    return true;
+                };
+
+                const gAddHost = section.add(new Adw.PreferencesGroup({
+                    title: 'Server abonnieren',
+                    description: 'Servernamen eingeben oder die Liste vom Monitoring laden.',
+                }));
+                const manual = new Adw.EntryRow({
+                    title: subscribed.has(ALL_HOSTS) ? 'Servername' : 'Servername (oder * für alle Server)',
+                    show_apply_button: true,
+                });
+                const addManual = () => {
+                    if (!addHost(manual.text))
+                        manual.add_css_class('error');
+                };
+                manual.connect('apply', addManual);
+                manual.connect('entry-activated', addManual);
+                gAddHost.add(manual);
+
+                const hosts = hostCache.get(targetId) ?? null;
+                const free = (hosts ?? []).filter(h => !subscribed.has(h));
                 const loadRow = new Adw.ActionRow({
-                    title: 'Dienste auswählen',
-                    subtitle: loaded.length ? `${loaded.length} Dienste geladen` : 'Liste vom Monitoring laden',
+                    title: 'Server vom Monitoring laden',
+                    subtitle: hosts === null ? 'Braucht gültige Verbindung und Zugangsdaten'
+                        : free.length === 0 ? 'Alle Server sind bereits abonniert'
+                            : `${free.length} Server noch nicht abonniert`,
                 });
                 const loadBtn = new Gtk.Button({
                     icon_name: 'view-refresh-symbolic',
                     valign: Gtk.Align.CENTER,
-                    tooltip_text: 'Dienste laden',
+                    tooltip_text: 'Serverliste laden',
                 });
                 loadBtn.connect('clicked', async () => {
                     loadBtn.sensitive = false;
                     loadRow.subtitle = 'Lade …';
                     await flushPending();
-                    const res = await callDriver(target.id, 'listServices', sub.host);
+                    const res = await callDriver(targetId, 'listHosts');
                     loadBtn.sensitive = true;
                     if (!res.ok) {
                         loadRow.subtitle = esc(describeResult(res));
                         return;
                     }
-                    if (res.items.length === 0) {
-                        loadRow.subtitle = 'Keine Dienste gefunden – stimmt der Servername?';
-                        return;
-                    }
-                    serviceCache.set(sub.id, res.items);
-                    expandedSubs.add(sub.id);
-                    rebuildSubs();
+                    hostCache.set(targetId, res.items);
+                    render();
                 });
                 loadRow.add_suffix(loadBtn);
-                expander.add_row(loadRow);
-                serviceRows.push(loadRow);
+                loadRow.activatable_widget = loadBtn;
+                gAddHost.add(loadRow);
 
-                for (const name of names) {
-                    const row = new Adw.ActionRow({ title: esc(name) });
-                    const check = new Gtk.CheckButton({
-                        active: current.selected.includes(name),
-                        valign: Gtk.Align.CENTER,
+                if (free.length > 0) {
+                    const hostList = new Adw.ExpanderRow({
+                        title: 'Verfügbare Server',
+                        subtitle: `${free.length} Server – mit + abonnieren`,
+                        expanded: true,
                     });
-                    check.connect('toggled', () => {
-                        const s = loadSubs().find(x => x.id === sub.id);
-                        if (!s)
-                            return;
-                        const selected = check.active
-                            ? [...new Set([...s.selected, name])]
-                            : s.selected.filter(n => n !== name);
-                        updateSub(sub.id, { selected });
-                        refreshSummary();
-                    });
-                    row.add_prefix(check);
-                    row.activatable_widget = check;
-                    expander.add_row(row);
-                    serviceRows.push(row);
+                    for (const host of free) {
+                        const row = new Adw.ActionRow({ title: esc(host) });
+                        const btn = new Gtk.Button({
+                            icon_name: 'list-add-symbolic',
+                            valign: Gtk.Align.CENTER,
+                            tooltip_text: 'Abonnieren',
+                            css_classes: ['flat'],
+                        });
+                        btn.connect('clicked', () => addHost(host));
+                        row.add_suffix(btn);
+                        row.activatable_widget = btn;
+                        hostList.add_row(row);
+                    }
+                    gAddHost.add(hostList);
                 }
-            }
-            showServiceRows();
-            modeRow.connect('notify::selected', () => {
-                updateSub(sub.id, { services: modes[modeRow.selected] });
-                showServiceRows();
-                refreshSummary();
-            });
 
-            // Log-Meldungen
-            if (hasCapability(type, 'events')) {
-                const eventsRow = new Adw.SwitchRow({
-                    title: 'Log-Meldungen (Event Console)',
-                    subtitle: 'Offene Meldungen aus Syslog, SNMP-Traps und Logdateien, die die Event Console erfasst',
+                // ---------- Entfernen ----------
+                const gDelete = section.add(new Adw.PreferencesGroup());
+                const deleteRow = new Adw.ActionRow({
+                    title: 'Ziel entfernen',
+                    subtitle: 'Löscht das Ziel, seine Abos und das Secret im Schlüsselbund',
                 });
-                eventsRow.active = sub.events;
-                eventsRow.connect('notify::active', () => {
-                    updateSub(sub.id, { events: eventsRow.active });
-                    refreshSummary();
-                });
-                expander.add_row(eventsRow);
-            }
-
-            // Ignorierliste
-            for (const pattern of sub.ignore) {
-                const row = new Adw.ActionRow({
-                    title: esc(pattern),
-                    subtitle: 'wird ignoriert',
-                });
-                const removeBtn = new Gtk.Button({
-                    icon_name: 'user-trash-symbolic',
+                const deleteBtn = new Gtk.Button({
+                    label: 'Entfernen',
                     valign: Gtk.Align.CENTER,
-                    tooltip_text: 'Nicht mehr ignorieren',
-                    css_classes: ['flat'],
+                    css_classes: ['destructive-action'],
                 });
-                removeBtn.connect('clicked', () => {
-                    const s = loadSubs().find(x => x.id === sub.id);
-                    if (s)
-                        updateSub(sub.id, { ignore: s.ignore.filter(p => p !== pattern) });
-                    expandedSubs.add(sub.id);
-                    rebuildSubs();
+                let armed = false;
+                deleteBtn.connect('clicked', async () => {
+                    if (!armed) {
+                        armed = true;
+                        deleteBtn.label = 'Wirklich entfernen?';
+                        GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, 5, () => {
+                            armed = false;
+                            if (deleteBtn.get_root())
+                                deleteBtn.label = 'Entfernen';
+                            return GLib.SOURCE_REMOVE;
+                        });
+                        return;
+                    }
+                    for (const save of savers)
+                        pendingSavers.delete(save);
+                    savers.clear();
+                    try {
+                        await clearSecret(secretName(targetId));
+                    } catch (e) {
+                        console.warn(`[monbar] Secret konnte nicht gelöscht werden: ${e.message}`);
+                    }
+                    saveSubs(loadSubs().filter(s => s.target !== targetId));
+                    saveTargets(loadTargets().filter(t => t.id !== targetId));
+                    hostCache.delete(targetId);
+                    window.pop_subpage();
                 });
-                row.add_suffix(removeBtn);
-                expander.add_row(row);
-            }
-            const ignoreEntry = new Adw.EntryRow({
-                title: isAll ? 'Ignorieren (gilt für das ganze Ziel), z. B. Log * oder Interface ?' : 'Ignorieren, z. B. Filesystem /boot* oder *Backup*',
-                show_apply_button: true,
-            });
-            const addPattern = () => {
-                const pattern = ignoreEntry.text.trim();
-                if (!isValidPattern(pattern)) {
-                    ignoreEntry.add_css_class('error');
-                    return;
-                }
-                const s = loadSubs().find(x => x.id === sub.id);
-                if (s && !s.ignore.includes(pattern))
-                    updateSub(sub.id, { ignore: [...s.ignore, pattern] });
-                expandedSubs.add(sub.id);
-                rebuildSubs();
+                deleteRow.add_suffix(deleteBtn);
+                gDelete.add(deleteRow);
             };
-            ignoreEntry.connect('apply', addPattern);
-            ignoreEntry.connect('entry-activated', addPattern);
-            expander.add_row(ignoreEntry);
 
-            // Abo entfernen
-            const removeRow = new Adw.ActionRow({
-                title: isAll ? 'Abo „Alle Server“ entfernen' : 'Server nicht mehr abonnieren',
-                subtitle: isAll ? 'Danach werden nur noch einzeln abonnierte Server angezeigt' : '',
+            sp.nav.connect('hidden', () => {
+                // Seite verlassen (zurück zur Übersicht oder weiter zu einem Server)
+                runSavers();
+                renderOverview();
             });
-            const removeBtn = new Gtk.Button({
-                label: 'Entfernen',
-                valign: Gtk.Align.CENTER,
-            });
-            removeBtn.connect('clicked', () => {
-                saveSubs(loadSubs().filter(s => s.id !== sub.id));
-                serviceCache.delete(sub.id);
-                rebuildSubs();
-            });
-            removeRow.add_suffix(removeBtn);
-            expander.add_row(removeRow);
+            sp.nav.connect('showing', () => openRenderers.add(render));
+            sp.nav.connect('hiding', () => openRenderers.delete(render));
 
-            return expander;
+            render();
+            window.push_subpage(sp.nav);
         };
 
-        rebuildTargets();
-        rebuildSubs();
+        // --- Unterseite: ein abonnierter Server ---
+        const openSub = (targetId, subId, onClose) => {
+            const target = getTarget(targetId);
+            const initial = loadSubs().find(s => s.id === subId);
+            if (!target || !initial)
+                return;
+            const type = getType(target.type);
+            const isAll = initial.host === ALL_HOSTS;
+            const what = type.driver === 'prometheus-kuma' ? 'Monitore' : 'Dienste';
+            const sp = makeSubpage(isAll ? 'Alle Server' : initial.host, target.name);
+            const section = makeSection(sp.page);
+
+            const render = () => {
+                section.clear();
+                const sub = loadSubs().find(s => s.id === subId);
+                if (!sub)
+                    return;
+
+                // ---------- Dienste ----------
+                const modes = isAll ? ['all', 'none'] : ['all', 'selected', 'none'];
+                const modeLabels = { all: 'Alle', selected: 'Nur ausgewählte', none: 'Keine (nur Serverstatus)' };
+                const gServices = section.add(new Adw.PreferencesGroup({
+                    title: what,
+                    description: isAll
+                        ? `Gilt für alle Server dieses Ziels. Einzelne ${what} wählst du aus, indem du den Server einzeln abonnierst.`
+                        : `Welche ${what} dieses Servers angezeigt werden. Der Serverstatus selbst (z. B. DOWN) wird immer angezeigt.`,
+                }));
+                const modeRow = new Adw.ComboRow({
+                    title: 'Anzeigen',
+                    model: new Gtk.StringList({ strings: modes.map(m => modeLabels[m]) }),
+                });
+                modeRow.selected = Math.max(0, modes.indexOf(sub.services));
+                modeRow.connect('notify::selected', () => {
+                    updateSub(subId, { services: modes[modeRow.selected] });
+                    render();
+                });
+                gServices.add(modeRow);
+
+                if (!isAll && sub.services === 'selected') {
+                    const loaded = serviceCache.get(subId) ?? [];
+                    const names = [...new Set([...sub.selected, ...loaded])].sort((a, b) => a.localeCompare(b));
+                    const loadRow = new Adw.ActionRow({
+                        title: `${what} vom Monitoring laden`,
+                        subtitle: loaded.length ? `${loaded.length} ${what} geladen – Haken setzen, was angezeigt werden soll`
+                            : `${sub.selected.length} ausgewählt`,
+                    });
+                    const loadBtn = new Gtk.Button({
+                        icon_name: 'view-refresh-symbolic',
+                        valign: Gtk.Align.CENTER,
+                        tooltip_text: `${what} laden`,
+                    });
+                    loadBtn.connect('clicked', async () => {
+                        loadBtn.sensitive = false;
+                        loadRow.subtitle = 'Lade …';
+                        const res = await callDriver(targetId, 'listServices', sub.host);
+                        loadBtn.sensitive = true;
+                        if (!res.ok) {
+                            loadRow.subtitle = esc(describeResult(res));
+                            return;
+                        }
+                        if (res.items.length === 0) {
+                            loadRow.subtitle = `Keine ${what} gefunden – stimmt der Servername?`;
+                            return;
+                        }
+                        serviceCache.set(subId, res.items);
+                        render();
+                    });
+                    loadRow.add_suffix(loadBtn);
+                    loadRow.activatable_widget = loadBtn;
+                    gServices.add(loadRow);
+
+                    for (const name of names) {
+                        const row = new Adw.ActionRow({ title: esc(name) });
+                        const check = new Gtk.CheckButton({
+                            active: sub.selected.includes(name),
+                            valign: Gtk.Align.CENTER,
+                        });
+                        check.connect('toggled', () => {
+                            const s = loadSubs().find(x => x.id === subId);
+                            if (!s)
+                                return;
+                            const selected = check.active
+                                ? [...new Set([...s.selected, name])]
+                                : s.selected.filter(n => n !== name);
+                            updateSub(subId, { selected });
+                        });
+                        row.add_prefix(check);
+                        row.activatable_widget = check;
+                        gServices.add(row);
+                    }
+                }
+
+                // ---------- Log-Meldungen ----------
+                if (hasCapability(type, 'events')) {
+                    const gEvents = section.add(new Adw.PreferencesGroup({
+                        title: 'Log-Meldungen',
+                        description: 'Offene Meldungen der Checkmk Event Console (Syslog, SNMP-Traps, Logdateien). Log-Dienste wie „Log System“ oder „Log Security“ sind normale Dienste und werden oben mit ausgewählt.',
+                    }));
+                    const eventsRow = new Adw.SwitchRow({ title: 'Meldungen der Event Console anzeigen' });
+                    eventsRow.active = sub.events;
+                    eventsRow.connect('notify::active', () => updateSub(subId, { events: eventsRow.active }));
+                    gEvents.add(eventsRow);
+                }
+
+                // ---------- Ignorieren ----------
+                const gIgnore = section.add(new Adw.PreferencesGroup({
+                    title: 'Ignorieren',
+                    description: `Muster: * = beliebige Zeichen, ? = genau ein Zeichen, Groß-/Kleinschreibung egal. Sie gelten für Namen von ${what} und für den Text von Log-Meldungen.${isAll ? ' Diese Liste gilt für alle Server des Ziels.' : ''} Der Knopf mit dem durchgestrichenen Auge im Popup trägt hier ein Muster ein.`,
+                }));
+                if (sub.ignore.length === 0) {
+                    gIgnore.add(new Adw.ActionRow({ title: 'Nichts ignoriert', css_classes: ['dim-label'] }));
+                }
+                for (const pattern of sub.ignore) {
+                    const row = new Adw.ActionRow({ title: esc(pattern) });
+                    row.add_prefix(new Gtk.Image({ icon_name: 'view-conceal-symbolic', valign: Gtk.Align.CENTER }));
+                    const removeBtn = new Gtk.Button({
+                        icon_name: 'user-trash-symbolic',
+                        valign: Gtk.Align.CENTER,
+                        tooltip_text: 'Nicht mehr ignorieren',
+                        css_classes: ['flat'],
+                    });
+                    removeBtn.connect('clicked', () => {
+                        const s = loadSubs().find(x => x.id === subId);
+                        if (s)
+                            updateSub(subId, { ignore: s.ignore.filter(p => p !== pattern) });
+                        render();
+                    });
+                    row.add_suffix(removeBtn);
+                    gIgnore.add(row);
+                }
+                const ignoreEntry = new Adw.EntryRow({
+                    title: type.driver === 'prometheus-kuma'
+                        ? 'Muster hinzufügen, z. B. Test* oder *intern*'
+                        : 'Muster hinzufügen, z. B. Filesystem /boot*, Log * oder *Codeintegrität*',
+                    show_apply_button: true,
+                });
+                const addPattern = () => {
+                    const pattern = ignoreEntry.text.trim();
+                    if (!isValidPattern(pattern)) {
+                        ignoreEntry.add_css_class('error');
+                        return;
+                    }
+                    const s = loadSubs().find(x => x.id === subId);
+                    if (s && !s.ignore.includes(pattern))
+                        updateSub(subId, { ignore: [...s.ignore, pattern] });
+                    render();
+                };
+                ignoreEntry.connect('apply', addPattern);
+                ignoreEntry.connect('entry-activated', addPattern);
+                gIgnore.add(ignoreEntry);
+
+                // ---------- Entfernen ----------
+                const gRemove = section.add(new Adw.PreferencesGroup());
+                const removeRow = new Adw.ActionRow({
+                    title: isAll ? 'Abo „Alle Server“ entfernen' : 'Server nicht mehr abonnieren',
+                    subtitle: isAll ? 'Danach werden nur noch einzeln abonnierte Server angezeigt' : '',
+                });
+                const removeBtn = new Gtk.Button({ label: 'Entfernen', valign: Gtk.Align.CENTER });
+                removeBtn.connect('clicked', () => {
+                    saveSubs(loadSubs().filter(s => s.id !== subId));
+                    serviceCache.delete(subId);
+                    window.pop_subpage();
+                });
+                removeRow.add_suffix(removeBtn);
+                gRemove.add(removeRow);
+            };
+
+            sp.nav.connect('hidden', () => onClose());
+            sp.nav.connect('showing', () => openRenderers.add(render));
+            sp.nav.connect('hiding', () => openRenderers.delete(render));
+            render();
+            window.push_subpage(sp.nav);
+        };
+
+        renderOverview();
 
         // Änderungen von außen (Ignorieren-Knopf im Popup, zweites Einstellungsfenster)
+        const onExternalChange = () => {
+            if (ownWrite > 0)
+                return;
+            renderOverview();
+            for (const render of openRenderers)
+                render();
+        };
         const signals = [
-            settings.connect('changed::subscriptions', () => {
-                if (ownWrite === 0)
-                    rebuildSubs();
-            }),
-            settings.connect('changed::targets', () => {
-                if (ownWrite === 0) {
-                    rebuildTargets();
-                    rebuildSubs();
-                }
-            }),
+            settings.connect('changed::subscriptions', onExternalChange),
+            settings.connect('changed::targets', onExternalChange),
         ];
         window.connect('close-request', () => {
             for (const save of pendingSavers)
@@ -822,7 +868,7 @@ export default class MonBarPreferences extends ExtensionPreferences {
         });
 
         // ==========================================
-        // Seite 3: Allgemein
+        // Seite 2: Allgemein
         // ==========================================
         const pageGeneral = new Adw.PreferencesPage({
             title: 'Allgemein',
@@ -885,7 +931,7 @@ export default class MonBarPreferences extends ExtensionPreferences {
         groupNotify.add(severityRow);
 
         // ==========================================
-        // Seite 4: Updates
+        // Seite 3: Updates
         // ==========================================
         const pageUpdate = new Adw.PreferencesPage({
             title: 'Updates',
@@ -1042,9 +1088,9 @@ export default class MonBarPreferences extends ExtensionPreferences {
         // Neue Datenbank (von hier oder im Hintergrund von der Extension geladen)
         const dbSignal = settings.connect('changed::target-db-revision', () => {
             loadTargetTypes(this.path);
-            fillTypeRow();
-            rebuildTargets();
-            rebuildSubs();
+            renderOverview();
+            for (const render of openRenderers)
+                render();
             setDbStatus('emblem-ok-symbolic', describeDb());
         });
         window.connect('close-request', () => {

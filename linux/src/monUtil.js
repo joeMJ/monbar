@@ -358,19 +358,30 @@ export function ignoreTexts(problem) {
         return [problem.name, problem.text, `${problem.name}: ${problem.text}`];
     if (problem.kind === 'host')
         return [problem.host];
+    // Log-Dienste (Logwatch): Dienstname oder die gemeldete Log-Zeile
+    if (problem.log)
+        return [problem.name, problem.text];
     return [problem.name];
+}
+
+function containsPattern(text) {
+    let core = String(text ?? '').replace(/\s+/g, ' ').trim().slice(0, 60).trim();
+    // Maskierte Sonderzeichen verlängern das Muster – nie über die erlaubte Länge
+    while (core && escapeGlob(core).length + 2 > MAX_PATTERN_LENGTH)
+        core = core.slice(0, -1).trim();
+    return core ? `*${escapeGlob(core)}*` : null;
 }
 
 /**
  * Muster, mit dem der „Ignorieren“-Knopf im Popup genau diese Meldung ausblendet:
- * bei Diensten der Dienstname, bei Log-Meldungen der Meldungstext.
+ * bei Diensten der Dienstname, bei Log-Meldungen (Event Console oder Logwatch-Dienst)
+ * der Anfang der Log-Zeile – damit nur diese Meldung verschwindet, nicht das ganze Log.
  */
 export function ignorePatternFor(problem) {
-    if (problem.kind === 'event') {
-        const text = String(problem.text ?? '').trim();
-        const base = text.length > 0 ? text : problem.name;
-        const escaped = escapeGlob(base);
-        return escaped.length <= MAX_PATTERN_LENGTH ? escaped : `${escapeGlob(base.slice(0, 80))}*`;
+    if (problem.kind === 'event' || problem.log) {
+        const pattern = containsPattern(problem.text);
+        if (pattern)
+            return pattern;
     }
     const escaped = escapeGlob(problem.name);
     return escaped.length <= MAX_PATTERN_LENGTH ? escaped : `${escapeGlob(problem.name.slice(0, 80))}*`;
@@ -692,6 +703,7 @@ export function checkmkServiceProblems(rows, target, { hardOnly = true } = {}, t
         .filter(r => !hardOnly || r.state_type === undefined || Number(r.state_type) === 1)
         .map(r => {
             const { severity, label } = mapState(type, 'service', r.state);
+            const log = parseLogwatch(r.plugin_output);
             return finishProblem({
                 target: target.id,
                 kind: 'service',
@@ -699,12 +711,37 @@ export function checkmkServiceProblems(rows, target, { hardOnly = true } = {}, t
                 name: r.description,
                 severity,
                 label,
-                text: trimText(r.plugin_output),
+                text: trimText(log ? log.message : r.plugin_output),
+                log: !!log,
+                count: log?.count ?? null,
                 since: toMillis(r.last_state_change),
                 acknowledged: truthy(r.acknowledged),
                 downtime: Number(r.scheduled_downtime_depth) > 0 || Number(r.host_scheduled_downtime_depth) > 0,
             });
         });
+}
+
+/**
+ * Zerlegt die Ausgabe eines Checkmk-Logwatch-Dienstes (Syslog, Windows-Ereignisprotokoll …):
+ *   '1 CRIT messages (Last worst: "Sep 27 06:24:21 49158.25 volsnap Die Schattenkopien …")'
+ *   '2 WARN, 1 CRIT messages (Last worst: "…")'
+ * @returns {{count: number, message: string}|null} null, wenn es keine Logwatch-Ausgabe ist
+ */
+export function parseLogwatch(output) {
+    const s = String(output ?? '').trim();
+    const m = /^((?:[0-9]+\s+(?:CRIT|WARN|OK|IGN)\s*,?\s*)+)messages?\s*\(Last worst:\s*"?([\s\S]*?)"?\s*\)\s*$/i.exec(s);
+    if (!m)
+        return null;
+    const count = [...m[1].matchAll(/[0-9]+/g)].reduce((sum, x) => sum + Number(x[0]), 0);
+    return { count, message: stripLogPrefix(m[2]) };
+}
+
+/** Entfernt Zeitstempel und Kennnummer am Anfang einer Log-Zeile („Sep 27 06:24:21 49158.25 “). */
+export function stripLogPrefix(line) {
+    return String(line ?? '')
+        .replace(/^[A-Z][a-z]{2}\s+[0-9]{1,2}\s+[0-9]{2}:[0-9]{2}:[0-9]{2}\s+/, '')
+        .replace(/^[0-9]+(\.[0-9]+)?\s+/, '')
+        .trim();
 }
 
 /**

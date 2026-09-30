@@ -43,8 +43,11 @@
 
 /* Popup Menü */
 .monbar-menu {
-    min-width: 440px;
-    max-width: 540px;
+    /* Feste Breite: GNOME Shell berechnet die Höhe umbrechender Texte sonst falsch,
+       und lange Log-Meldungen laufen aus den Karten heraus */
+    width: 460px;
+    min-width: 460px;
+    max-width: 460px;
 }
 
 .monbar-content-box {
@@ -130,6 +133,7 @@
     border-radius: 10px;
     spacing: 4px;
     padding-right: 6px;
+    padding-top: 2px;
 }
 
 .monbar-card-main {
@@ -148,6 +152,9 @@
 
 .monbar-card-info {
     spacing: 1px;
+    /* feste Breite für den Zeilenumbruch, siehe .monbar-menu */
+    width: 330px;
+    max-width: 330px;
 }
 
 .monbar-card-title {
@@ -169,6 +176,11 @@
 .monbar-card-detail {
     font-size: 8.5pt;
     opacity: 0.75;
+    margin-top: 2px;
+}
+
+.monbar-card-log {
+    font-style: italic;
 }
 
 /* Schweregrade */

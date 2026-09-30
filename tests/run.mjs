@@ -340,6 +340,35 @@ test('Checkmk: Host- und Service-Antwort werden normiert', () => {
     assert.deepEqual(u.checkmkRows({}), []);
 });
 
+test('Checkmk: Logwatch-Ausgabe wird in Anzahl und Meldung zerlegt', () => {
+    const out = '1 CRIT messages (Last worst: "Sep 27 06:24:21 49158.25 volsnap Die Schattenkopien von Volume "V:" wurden gelöscht.")';
+    assert.deepEqual(u.parseLogwatch(out), { count: 1, message: 'volsnap Die Schattenkopien von Volume "V:" wurden gelöscht.' });
+    assert.equal(u.parseLogwatch('2 WARN, 3 CRIT messages (Last worst: "Sep 30 15:00:56 0.5038 Microsoft-Windows-Security-Auditing Codeintegrität")').count, 5);
+    assert.equal(u.parseLogwatch('CRIT - 10.0.0.2: rta nan'), null);
+
+    const [p] = u.checkmkServiceProblems(u.checkmkRows({ value: [
+        { extensions: { host_name: 'hv02', description: 'Log Security', state: 2, state_type: 1,
+            plugin_output: '19 CRIT messages (Last worst: "Sep 30 15:00:56 0.5038 Microsoft-Windows-Security-Auditing Die Codeintegrität hat festgestellt, dass der Abbildhash einer Datei nicht gültig ist.")' } },
+    ] }), cmk);
+    assert.equal(p.log, true);
+    assert.equal(p.count, 19);
+    assert.match(p.text, /^Microsoft-Windows-Security-Auditing Die Codeintegrität/);
+
+    // Ignorieren-Knopf: nur diese Meldung, nicht das ganze Log
+    const pattern = u.ignorePatternFor(p);
+    assert.ok(pattern.startsWith('*') && pattern.endsWith('*') && pattern.length <= 100);
+    const subs = u.addIgnoreForProblem([sub('*')], p).subs;
+    const other = { ...p, text: 'Microsoft-Windows-Kernel-Power Das System wurde neu gestartet' };
+    other.key = u.problemKey({ ...other, name: 'x' });
+    assert.deepEqual(u.filterProblems([p, other], subs, T).map(x => x.text), [other.text]);
+    // Ganzes Log über den Dienstnamen ignorieren geht weiterhin
+    assert.equal(u.filterProblems([p, other], [sub('*', { ignore: ['Log Security'] })], T).length, 0);
+    // Muster mit vielen Sonderzeichen bleibt innerhalb der Längengrenze
+    const star = { ...p, text: '*?'.repeat(60) };
+    assert.ok(u.ignorePatternFor(star).length <= 100);
+    assert.ok(u.matchesAny([u.ignorePatternFor(star)], u.ignoreTexts(star)));
+});
+
 test('Checkmk: Event Console – offene Meldungen, Filter auf Server, Zahlen- und Textstatus', () => {
     const json = { value: [
         { id: '12', extensions: { host: 'nas', application: 'sshd', text: 'Failed password', state: 1,

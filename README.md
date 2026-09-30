@@ -20,7 +20,7 @@
 
 | Plattform | Status | Verzeichnis | Tech Stack |
 | :--- | :--- | :--- | :--- |
-| **Linux (GNOME Shell)** | In Entwicklung (v0.1) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
+| **Linux (GNOME Shell)** | In Entwicklung (v0.2) | [`linux/`](linux/) | GNOME Shell 46–50 ESM, Libsoup 3.0, GTK4/Adw, libsecret |
 
 ---
 
@@ -128,9 +128,13 @@ Update mit `./update.sh` (führt `git pull` aus), Deinstallation mit `./uninstal
 2. In monbar ein Ziel „Uptime Kuma“ mit **Server-URL** (z. B. `http://192.168.1.10:3001`) und dem **API-Key** anlegen. Das Benutzerfeld bleibt leer.
 3. Monitore werden nach Hostname bzw. Host der URL zu „Servern“ gruppiert, damit Abos und Ignorierlisten wie bei Checkmk funktionieren.
 
-### Abos
+### Aufbau der Einstellungen
 
-Neue Ziele abonnieren automatisch **Alle Server**. Unter *Abos* lassen sich stattdessen einzelne Server wählen („Server vom Monitoring laden“), je Server die Dienste eingrenzen und Muster zum Ignorieren anlegen.
+* **Ziele** – Übersicht aller Ziele. Ein Klick öffnet die Seite des Ziels mit den Abschnitten *Allgemein*, *Verbindung*, *Zugangsdaten*, *Abos* und *Server abonnieren*.
+* **Seite eines Servers** (Klick auf ein Abo) – *Dienste* (alle, ausgewählte oder keine), *Log-Meldungen* (Event Console) und *Ignorieren*.
+* **Allgemein** – Anzeige, Filter, Benachrichtigungen. **Updates** – Programm und Zielarten-Datenbank.
+
+Neue Ziele abonnieren automatisch **Alle Server**. Log-Dienste wie „Log System“ zeigen im Popup nur die gemeldete Log-Zeile; der Ignorieren-Knopf blendet dann genau diese Meldung aus, nicht das ganze Log.
 
 ---
 
